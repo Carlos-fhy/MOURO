@@ -7,7 +7,7 @@ backend/
 ├── app/
 │   ├── __init__.py              # Flask 应用工厂
 │   ├── config.py                # 全局配置与算法默认参数
-│   ├── extensions.py            # 扩展初始化（db）
+│   ├── extensions.py            # 数据库连接管理（原生 sqlite3）
 │   ├── auth/
 │   │   ├── __init__.py
 │   │   └── routes.py            # 登录接口
@@ -40,9 +40,10 @@ backend/
 │   └── utils/
 │       ├── __init__.py
 │       ├── distance.py          # 距离矩阵计算
-│       └── normalize.py         # Min-Max 归一化工具
+│       ├── normalize.py         # Min-Max 归一化工具
+│       └── objective.py         # 目标函数计算（F1/F2'/F3/Z）
 ├── data/
-│   ├── solomon/                 # Solomon 算例文件
+│   ├── solomon/                 # Solomon 算例文件（文件名小写，UI 显示大写）
 │   │   ├── c101.txt
 │   │   ├── c201.txt
 │   │   ├── r101.txt
@@ -92,6 +93,8 @@ def create_app():
 
 ## 3. API 接口清单
 
+**统一响应格式：** 所有接口返回 `{"success": bool, "data": {...}, "message": "..."}`。下表响应体列仅描述 `data` 字段内容。
+
 ### 3.1 认证接口
 
 | 方法 | 路径 | 请求体 | 响应体 | 说明 |
@@ -119,7 +122,7 @@ def create_app():
 
 | 方法 | 路径 | 请求体 | 响应体 | 说明 |
 |------|------|--------|--------|------|
-| POST | `/api/compare/start` | `{algorithms[], lambdas, Q, params}` | `{task_id}` | 启动多算法对比 |
+| POST | `/api/compare/start` | `{algorithms[], lambdas, Q, params, runs?}` | `{task_id}` | 启动多算法对比，runs 默认5次 |
 | GET | `/api/compare/stream/<task_id>` | — | SSE 流 | 各算法进度推送 |
 | GET | `/api/compare/result/<task_id>` | — | `{results: [...]}` | 获取对比结果 |
 
@@ -139,7 +142,7 @@ def create_app():
     "vehicles_used": 4
 }
 
-# 算法完成消息
+# 算法完成消息（不含完整结果，前端收到后调用 GET /result/<task_id> 拉取）
 {
     "type": "done",
     "task_id": "abc123",
@@ -157,10 +160,14 @@ def create_app():
 **Flask SSE 实现模式：**
 
 ```python
-from flask import Response, stream_with_context
+from flask import Response, stream_with_context, request
 
 @solve_bp.route('/stream/<task_id>')
 def stream(task_id):
+    # SSE 端点通过 query param 传递 token（EventSource 不支持自定义 Header）
+    token = request.args.get('token')
+    verify_token(token)  # 校验失败抛 401
+
     def generate():
         task = task_manager.get(task_id)
         for msg in task.iter_messages():
@@ -174,6 +181,8 @@ def stream(task_id):
 ## 5. 数据模型
 
 ### 5.1 SQLite 表结构
+
+**dataset_id 命名规则：** Solomon 模式为 `"solomon_c101"`、`"solomon_r201"` 等（小写）；首尔模式为 `"seoul_<文件名>"` 如 `"seoul_n50"`。加载新数据集时，先删除同 dataset_id 的旧数据再写入。
 
 **节点表 `nodes`：**
 
@@ -235,7 +244,12 @@ class BaseAlgorithm:
     """所有算法的统一接口"""
 
     def __init__(self, customers, depot, distance_matrix, time_matrix, params):
-        ...
+        """
+        distance_matrix: 距离矩阵（用于 F1 成本计算）
+        time_matrix: 行驶时间矩阵（用于 F2' 和时间窗判断）
+        Solomon 模式下 time_matrix = distance_matrix（速度=1）
+        首尔模式下两者独立（非对称路网时间矩阵）
+        """
 
     def solve(self, callback=None):
         """
@@ -253,7 +267,16 @@ class SolutionResult:
     z: float              # 综合目标值
     vehicles_used: int
     convergence: list     # [(iteration, z_value), ...]
-    schedule: list        # 每个客户的到达时刻明细
+    schedule: list        # 调度明细，每个元素结构如下：
+    # {
+    #     "vehicle_id": int,       # 车辆编号（从1开始）
+    #     "customer_id": int,      # 客户节点编号
+    #     "arrival_time": float,   # 到达时刻
+    #     "departure_time": float, # 离开时刻（arrival + wait + service）
+    #     "demand": float,         # 卸货重量
+    #     "penalty": float,        # 该客户的时间窗惩罚值
+    #     "status": str            # "on_time" | "early" | "late"
+    # }
 ```
 
 ### 6.2 类继承关系
@@ -312,7 +335,7 @@ JWT_EXPIRATION = 86400  # 24小时
 class Config:
     # --- Flask ---
     SECRET_KEY = "mouro-secret-key"
-    SQLALCHEMY_DATABASE_URI = "sqlite:///mouro.db"
+    DATABASE_PATH = "mouro.db"          # 原生 sqlite3，不使用 SQLAlchemy
 
     # --- 认证 ---
     ADMIN_USERNAME = "admin"
@@ -331,6 +354,24 @@ class Config:
         "delta": 2.0,            # 时间启发式重要度
         "rho_cost": 0.1,         # 成本信息素挥发系数
         "rho_time": 0.1,         # 时间信息素挥发系数
+    }
+
+    DEFAULT_GA_PARAMS = {
+        "population_size": 100,      # 种群大小
+        "max_iterations": 200,
+        "patience": 50,
+        "early_stop_threshold": 1e-6,
+        "crossover_rate": 0.8,       # 交叉概率
+        "mutation_rate": 0.1,        # 变异概率
+    }
+
+    DEFAULT_SA_PARAMS = {
+        "initial_temperature": 1000, # 初始温度
+        "cooling_rate": 0.995,       # 降温系数
+        "min_temperature": 1e-3,     # 终止温度
+        "max_iterations": 200,
+        "patience": 50,
+        "early_stop_threshold": 1e-6,
     }
 
     # --- 业务默认参数 ---
