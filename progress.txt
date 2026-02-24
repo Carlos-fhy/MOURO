@@ -1,0 +1,29 @@
+项目：MOURO (Multi-Objective Urban Route Optimization)
+最后更新：2026-02-24
+
+## 当前阶段
+规划完成
+
+## 已完成
+- [x] 毕业设计任务大纲编写
+- [x] 核心文档编写（PRD、APP_FLOW、TECH_STACK、FRONTEND_GUIDELINES、BACKEND_STRUCTURE、IMPLEMENTATION_PLAN）
+- [x] CLAUDE.md 操作手册创建
+- [x] Git 仓库初始化并推送至 GitHub
+
+## 进行中
+- [ ] Phase 0: 项目初始化（P0-1 ~ P0-9 均未开始）
+
+## 下一步（按优先级）
+1. P0-1: 创建项目根目录结构（backend/、frontend/、docs/、data/）
+2. P0-2: 初始化 Python 虚拟环境，安装后端依赖，生成 requirements.txt
+3. P0-3: 使用 npm create vue@latest 初始化 Vue 3 项目，安装前端依赖
+4. P0-5: 创建 Flask 应用工厂，注册空蓝图，配置 CORS
+5. P0-6: 创建 config.py，写入所有默认参数
+6. P0-7: 初始化 SQLite 数据库，执行建表 SQL
+
+## 已知问题/Lessons
+- Solomon 算例文件（P0-8）和首尔数据集（P0-9）需要手动下载，无法自动获取
+- 首尔 ACVRP 数据集来源：Mendeley Data，需确认具体文件格式后再编写解析器
+
+## 技术债务
+- 无（项目尚未开始编码）

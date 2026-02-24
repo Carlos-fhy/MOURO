@@ -26,7 +26,10 @@ frontend/
 │   │   │   └── ParetoChart.vue       # Pareto 散点图
 │   │   └── common/
 │   │       ├── KpiCard.vue     # KPI 数据卡片
-│   │       └── SseLogBox.vue   # SSE 日志终端框
+│   │       ├── SseLogBox.vue   # SSE 日志终端框
+│   │       ├── ParamPanel.vue  # 高级算法参数折叠面板
+│   │       ├── LambdaSlider.vue # 三联动λ滑块
+│   │       └── ScheduleTable.vue # 按车辆分组调度明细表
 │   ├── views/                  # 页面级组件
 │   │   ├── LoginView.vue
 │   │   ├── DashboardView.vue
@@ -195,12 +198,16 @@ const ROUTE_COLORS = [
 
 ```javascript
 export function createSseConnection(url, { onMessage, onDone, onError }) {
-  const eventSource = new EventSource(url)
+  const token = localStorage.getItem('token')
+  const eventSource = new EventSource(`${url}?token=${token}`)
 
   eventSource.onmessage = (event) => {
     const data = JSON.parse(event.data)
-    if (data.status === 'done') {
-      onDone(data.result)
+    if (data.type === 'done') {
+      onDone(data)
+      eventSource.close()
+    } else if (data.type === 'error') {
+      onError(data.message)
       eventSource.close()
     } else {
       onMessage(data)
@@ -235,7 +242,7 @@ export function createSseConnection(url, { onMessage, onDone, onError }) {
 import axios from 'axios'
 
 const request = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: '/api',       // 通过 Vite proxy 转发到 localhost:5000
   timeout: 30000
 })
 
