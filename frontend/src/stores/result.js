@@ -20,11 +20,11 @@ export const useResultStore = defineStore('result', () => {
 
   function setResult(data) {
     routes.value = data.routes || []
-    f1.value = data.kpi?.f1 ?? 0
-    f2.value = data.kpi?.f2 ?? 0
-    f3.value = data.kpi?.f3 ?? 0
-    z.value = data.kpi?.z ?? 0
-    vehiclesUsed.value = data.kpi?.vehicles_used ?? 0
+    f1.value = data.f1 ?? 0
+    f2.value = data.f2 ?? 0
+    f3.value = data.f3 ?? 0
+    z.value = data.z ?? 0
+    vehiclesUsed.value = data.vehicles_used ?? 0
     convergence.value = data.convergence || []
     schedule.value = data.schedule || []
     unreachable.value = data.unreachable || []

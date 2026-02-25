@@ -15,8 +15,14 @@ const props = defineProps({
   // solomon 用平面坐标，seoul 用经纬度
   coordMode: { type: String, default: 'solomon' },
   // 调度明细，用于弹窗显示到达时间等
-  schedule: { type: Array, default: () => [] }
+  schedule: { type: Array, default: () => [] },
+  // 路线绘制动画开关
+  animated: { type: Boolean, default: true }
 })
+
+// 动画状态
+let animationTimers = []
+let isAnimating = ref(false)
 
 // 路线颜色方案
 const ROUTE_COLORS = [
@@ -40,11 +46,19 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopAnimation()
   if (map) {
     map.remove()
     map = null
   }
 })
+
+// 清除所有动画定时器
+function stopAnimation() {
+  animationTimers.forEach(t => clearTimeout(t))
+  animationTimers = []
+  isAnimating.value = false
+}
 
 // 监听数据变化重新渲染
 watch(
@@ -77,6 +91,7 @@ function initMap() {
 
 function renderMap() {
   if (!map || !layerGroup) return
+  stopAnimation()
   layerGroup.clearLayers()
 
   const bounds = []
@@ -119,24 +134,28 @@ function renderMap() {
     })
   }
 
-  // 路线模式：绘制路线
+  // 路线模式：绘制路线（支持动画）
   if (props.mode === 'route' && props.routes.length) {
-    props.routes.forEach((route, idx) => {
-      const color = ROUTE_COLORS[idx % ROUTE_COLORS.length]
-      const points = route.map(nodeId => {
+    // 预处理所有路线的坐标
+    const allRoutePoints = props.routes.map((route, idx) => ({
+      color: ROUTE_COLORS[idx % ROUTE_COLORS.length],
+      points: route.map(nodeId => {
         if (nodeId === 0 && props.depot) return toLatLng(props.depot)
         const c = props.customers.find(cu => cu.id === nodeId)
         return c ? toLatLng(c) : null
       }).filter(Boolean)
+    }))
 
-      if (points.length > 1) {
-        L.polyline(points, {
-          color,
-          weight: 3,
-          opacity: 0.7
-        }).addTo(layerGroup)
-      }
-    })
+    if (props.animated) {
+      animateRoutes(allRoutePoints)
+    } else {
+      // 无动画：直接绘制
+      allRoutePoints.forEach(({ color, points }) => {
+        if (points.length > 1) {
+          L.polyline(points, { color, weight: 3, opacity: 0.7 }).addTo(layerGroup)
+        }
+      })
+    }
   }
 
   // 自动适配视野
@@ -144,6 +163,47 @@ function renderMap() {
     map.fitBounds(L.latLngBounds(bounds).pad(0.1))
   }
 }
+
+// 所有路线同时从配送中心出发，并行逐段绘制
+function animateRoutes(allRoutePoints) {
+  stopAnimation()
+  isAnimating.value = true
+
+  const segmentDelay = 80
+  // 找出最长路线的段数，用于判断动画结束
+  const maxSegments = Math.max(...allRoutePoints.map(r => r.points.length))
+  let finishedCount = 0
+
+  allRoutePoints.forEach(({ color, points }) => {
+    if (points.length < 2) { finishedCount++; return }
+
+    const polyline = L.polyline([points[0]], {
+      color, weight: 3, opacity: 0.8
+    }).addTo(layerGroup)
+
+    for (let i = 1; i < points.length; i++) {
+      const t = setTimeout(() => {
+        polyline.addLatLng(points[i])
+        // 该路线最后一段画完
+        if (i === points.length - 1) {
+          finishedCount++
+          if (finishedCount >= allRoutePoints.length) {
+            isAnimating.value = false
+          }
+        }
+      }, i * segmentDelay)
+      animationTimers.push(t)
+    }
+  })
+}
+
+// 重播动画
+function replay() {
+  renderMap()
+}
+
+// 暴露给父组件
+defineExpose({ replay, isAnimating })
 
 function toLatLng(node) {
   // Solomon 平面坐标：y 作为 lat，x 作为 lng

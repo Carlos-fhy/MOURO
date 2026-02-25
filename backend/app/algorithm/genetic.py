@@ -29,7 +29,7 @@ class GeneticAlgorithm(BaseAlgorithm):
         self.population_size = params.get("population_size", 100)
         self.crossover_rate = params.get("crossover_rate", 0.8)
         self.mutation_rate = params.get("mutation_rate", 0.1)
-        self.seed = params.get("seed", 42)
+        self.seed = self._default_seed
 
         # 业务参数
         self.alpha_base = params.get("alpha_base", 1.0)

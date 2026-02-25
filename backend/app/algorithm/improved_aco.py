@@ -3,7 +3,7 @@ import numpy as np
 from app.algorithm.base import BaseAlgorithm, SolutionResult
 from app.algorithm.greedy import GreedySolver
 from app.algorithm.precheck import precheck_reachability
-from app.algorithm.local_search import two_opt_routes
+from app.algorithm.local_search import full_local_search
 from app.utils.objective import (
     build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
 )
@@ -185,7 +185,7 @@ class ImprovedACO(BaseAlgorithm):
         self.beta_base = params.get("beta_base", 2.0)
         self.fixed_cost = params.get("fixed_cost", 200)
         self.cost_per_km = params.get("cost_per_km", 5.0)
-        self.seed = params.get("seed", 42)
+        self.seed = self._default_seed
 
         self.n = self.n_customers + 1  # 矩阵维度（depot + customers）
         self.customers_dict = {c["id"]: c for c in self.customers}
@@ -225,12 +225,24 @@ class ImprovedACO(BaseAlgorithm):
         tau_cost = np.full((self.n, self.n), tau0_cost)
         tau_time = np.full((self.n, self.n), tau0_time)
 
-        # η_cost = 1/d_ij，η_time = 1/t_ij（对角线和零值用极小值避免除零）
+        # η_cost = 1/d_ij（纯距离启发式）
         with np.errstate(divide="ignore", invalid="ignore"):
             eta_cost = np.where(self.distance_matrix > 0,
                                 1.0 / self.distance_matrix, 1e-10)
-            eta_time = np.where(self.time_matrix > 0,
-                                1.0 / self.time_matrix, 1e-10)
+
+        # η_time = ω_j / t_ij（融入应急权重的时间启发式）
+        # 当 dist==time（Solomon 数据）时，ω_j 使 η_time 与 η_cost 产生差异
+        # 医疗急件 ω=2.0 吸引力更强，引导蚂蚁优先服务高紧迫度客户
+        weight_vec = np.ones(self.n)
+        for c in working_customers:
+            idx = self.id_to_idx[c["id"]]
+            weight_vec[idx] = c.get("emergency_weight", 1.0)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            raw_eta_time = np.where(self.time_matrix > 0,
+                                    1.0 / self.time_matrix, 1e-10)
+        # 按列乘以目标客户的应急权重
+        eta_time = raw_eta_time * weight_vec[np.newaxis, :]
 
         # 4. 迭代状态变量
         best_routes = None
@@ -290,10 +302,11 @@ class ImprovedACO(BaseAlgorithm):
                     iter_best_routes = routes
                     iter_best_f1, iter_best_f2, iter_best_f3 = f1, f2, f3
 
-            # 本轮最优解执行 2-opt 局部搜索
+            # 本轮最优解执行完整局部搜索（2-opt + relocate）
             if iter_best_routes:
-                iter_best_routes = two_opt_routes(
-                    iter_best_routes, self.distance_matrix, self.id_to_idx
+                iter_best_routes = full_local_search(
+                    iter_best_routes, self.distance_matrix, self.id_to_idx,
+                    working_dict, self.vehicle_capacity
                 )
                 # 重新评估 2-opt 后的解
                 schedule = build_schedule(
@@ -376,15 +389,19 @@ class ImprovedACO(BaseAlgorithm):
 
         1. 全局挥发：τ = (1-ρ) × τ
         2. 精英沉积：仅全局最优解的边获得信息素增量
-           Δτ_cost = 1/F1, Δτ_time = 1/F2'
+           Δτ_cost = w_cost/F1, Δτ_time = w_time/F2'
+           其中 w_cost = λ₁, w_time = λ₂+λ₃（惩罚与时效相关）
+           λ 权重越大，对应信息素沉积越强，引导搜索偏向该目标
         """
         # 挥发
         tau_cost *= (1 - self.rho_cost)
         tau_time *= (1 - self.rho_time)
 
-        # 精英沉积
-        delta_cost = 1.0 / max(f1, 1e-10)
-        delta_time = 1.0 / max(f2, 1e-10)
+        # λ 加权信息素沉积
+        w_cost = max(self.lambdas[0], 0.05)
+        w_time = max(self.lambdas[1] + self.lambdas[2], 0.05)
+        delta_cost = w_cost / max(f1, 1e-10)
+        delta_time = w_time / max(f2, 1e-10)
 
         for route in routes:
             if len(route) <= 2:

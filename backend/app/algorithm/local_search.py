@@ -61,3 +61,126 @@ def two_opt_routes(routes, distance_matrix, id_to_idx):
         优化后的路线列表
     """
     return [two_opt_improve(r, distance_matrix, id_to_idx) for r in routes]
+
+
+def relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacity):
+    """路线间 relocate 算子 —— 尝试将客户从一条路线迁移到另一条路线的最佳位置
+
+    反复扫描所有路线对，找到能减少总距离的迁移操作并执行，
+    直到无法继续改善为止。
+
+    参数:
+        routes: 路线列表
+        distance_matrix: 距离矩阵
+        id_to_idx: 节点ID到矩阵索引映射
+        customers_dict: 客户ID到信息的映射
+        capacity: 车辆容量
+    返回:
+        优化后的路线列表
+    """
+    routes = [list(r) for r in routes]
+    improved = True
+
+    while improved:
+        improved = False
+        best_saving = -1e-10
+        best_move = None
+
+        for ri in range(len(routes)):
+            if len(routes[ri]) <= 3:
+                continue
+            for pos_i in range(1, len(routes[ri]) - 1):
+                cid = routes[ri][pos_i]
+                # 移除 cid 后的距离节省
+                saving_remove = _removal_saving(
+                    routes[ri], pos_i, distance_matrix, id_to_idx
+                )
+
+                for rj in range(len(routes)):
+                    if ri == rj:
+                        continue
+                    # 检查容量约束
+                    demand = _get_demand(cid, customers_dict)
+                    route_load = sum(
+                        _get_demand(routes[rj][k], customers_dict)
+                        for k in range(1, len(routes[rj]) - 1)
+                    )
+                    if route_load + demand > capacity:
+                        continue
+
+                    # 找 rj 中最佳插入位置
+                    best_insert_cost, best_insert_pos = _best_insertion(
+                        routes[rj], cid, distance_matrix, id_to_idx
+                    )
+                    total_saving = saving_remove - best_insert_cost
+                    if total_saving > best_saving:
+                        best_saving = total_saving
+                        best_move = (ri, pos_i, rj, best_insert_pos)
+
+        if best_move:
+            ri, pos_i, rj, insert_pos = best_move
+            cid = routes[ri][pos_i]
+            routes[ri].pop(pos_i)
+            routes[rj].insert(insert_pos, cid)
+            improved = True
+
+    # 移除空路线（只剩 depot→depot）
+    routes = [r for r in routes if len(r) > 2]
+    return routes
+
+
+def _removal_saving(route, pos, distance_matrix, id_to_idx):
+    """计算从路线中移除 pos 位置客户后的距离节省"""
+    prev = id_to_idx[route[pos - 1]]
+    curr = id_to_idx[route[pos]]
+    nxt = id_to_idx[route[pos + 1]]
+    old = distance_matrix[prev][curr] + distance_matrix[curr][nxt]
+    new = distance_matrix[prev][nxt]
+    return old - new
+
+
+def _best_insertion(route, cid, distance_matrix, id_to_idx):
+    """找到将 cid 插入 route 的最佳位置，返回 (插入成本增量, 插入位置)"""
+    c_idx = id_to_idx[cid]
+    best_cost = float("inf")
+    best_pos = 1
+
+    for pos in range(1, len(route)):
+        prev = id_to_idx[route[pos - 1]]
+        nxt = id_to_idx[route[pos]]
+        cost = (distance_matrix[prev][c_idx] + distance_matrix[c_idx][nxt]
+                - distance_matrix[prev][nxt])
+        if cost < best_cost:
+            best_cost = cost
+            best_pos = pos
+
+    return best_cost, best_pos
+
+
+def _get_demand(node_id, customers_dict):
+    """获取节点需求量，depot 返回 0"""
+    if node_id not in customers_dict:
+        return 0
+    c = customers_dict[node_id]
+    return c.get("demand", c.get("demand_weight", 0))
+
+
+def full_local_search(routes, distance_matrix, id_to_idx, customers_dict, capacity):
+    """完整局部搜索：先 2-opt 路线内优化，再 relocate 路线间优化
+
+    参数:
+        routes: 路线列表
+        distance_matrix: 距离矩阵
+        id_to_idx: 节点ID到矩阵索引映射
+        customers_dict: 客户ID到信息的映射
+        capacity: 车辆容量
+    返回:
+        优化后的路线列表
+    """
+    # 第一步：路线内 2-opt
+    routes = two_opt_routes(routes, distance_matrix, id_to_idx)
+    # 第二步：路线间 relocate
+    routes = relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacity)
+    # 第三步：再做一轮 2-opt（relocate 后路线结构变了）
+    routes = two_opt_routes(routes, distance_matrix, id_to_idx)
+    return routes

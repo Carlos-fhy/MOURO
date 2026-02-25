@@ -40,7 +40,7 @@ class SimulatedAnnealing(BaseAlgorithm):
         )
         self.cooling_rate = params.get("cooling_rate", 0.995)
         self.min_temperature = params.get("min_temperature", 1e-3)
-        self.seed = params.get("seed", 42)
+        self.seed = self._default_seed
 
         # 业务参数
         self.alpha_base = params.get("alpha_base", 1.0)

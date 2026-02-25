@@ -28,7 +28,7 @@ class StandardACO(BaseAlgorithm):
         self.beta_base = params.get("beta_base", 2.0)
         self.fixed_cost = params.get("fixed_cost", 200)
         self.cost_per_km = params.get("cost_per_km", 5.0)
-        self.seed = params.get("seed", 42)
+        self.seed = self._default_seed
         self.n = self.n_customers + 1
 
     def solve(self, callback=None):
@@ -101,10 +101,11 @@ class StandardACO(BaseAlgorithm):
 
             convergence.append((iteration + 1, round(best_z, 6)))
 
-            # 信息素更新：全局挥发 + 所有蚂蚁沉积
+            # 信息素更新：全局挥发 + 所有蚂蚁沉积（λ 加权）
+            # 使用 Z 值（含 λ 权重）而非纯 F1，使不同偏好产生不同信息素景观
             tau *= (1 - self.rho)
-            for routes_i, f1_i, _, _, _ in all_routes:
-                delta = 1.0 / max(f1_i, 1e-10)
+            for routes_i, _, _, _, z_i in all_routes:
+                delta = 1.0 / max(z_i, 1e-10)
                 for route in routes_i:
                     for k in range(len(route) - 1):
                         i = self.id_to_idx[route[k]]

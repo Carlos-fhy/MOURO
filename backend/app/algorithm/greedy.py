@@ -22,6 +22,13 @@ class GreedySolver:
         self.time_matrix = time_matrix if time_matrix is not None else distance_matrix
         self.params = params
         self.vehicle_capacity = params.get("vehicle_capacity", 1000)
+        # λ 权重影响贪心选择指标
+        lambdas = params.get("lambdas", [0.33, 0.33, 0.34])
+        self.w_cost = lambdas[0]
+        self.w_time = lambdas[1] + lambdas[2]
+
+        # 客户信息映射（用于时间窗紧迫度计算）
+        self._cust_dict = {c["id"]: c for c in customers}
 
         self.customer_ids = [c["id"] for c in customers]
         self.id_to_idx = {depot["id"]: 0}
@@ -49,16 +56,22 @@ class GreedySolver:
             current = depot_id
 
             while unvisited:
-                # 在未访问客户中找距离最近的
+                # 按 λ 加权指标选择下一个客户
+                # 省钱优先(λ₁大)→ 纯距离最近
+                # 抢时间(λ₂+λ₃大)→ 综合考虑距离和截止时间紧迫度
                 best_cid = None
-                best_dist = float("inf")
+                best_score = float("inf")
                 curr_idx = self.id_to_idx[current]
 
                 for cid in unvisited:
                     cid_idx = self.id_to_idx[cid]
-                    d = self.distance_matrix[curr_idx][cid_idx]
-                    if d < best_dist:
-                        best_dist = d
+                    dist = self.distance_matrix[curr_idx][cid_idx]
+                    # 时间窗紧迫度：截止时间越近越紧迫，值越小越优先
+                    c_info = self._cust_dict[cid]
+                    deadline = c_info.get("late_time", 9999)
+                    score = self.w_cost * dist + self.w_time * deadline
+                    if score < best_score:
+                        best_score = score
                         best_cid = cid
 
                 if best_cid is None:

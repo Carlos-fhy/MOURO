@@ -100,6 +100,12 @@ def load_seoul_to_db(instance_dir, emergency_ratio=None, seed=42, dataset_id=Non
         all_nodes = [depot] + customers
         dist_matrix = euclidean_distance_matrix(all_nodes)
 
+    # 2.5 获取时间矩阵（首尔数据含独立时间矩阵，与距离矩阵不同）
+    if parsed.get("time_matrix") is not None:
+        time_matrix = np.array(parsed["time_matrix"])
+    else:
+        time_matrix = dist_matrix
+
     # 3. 生成缺失字段（需求量、服务时间、应急等级、时间窗）
     customers = generate_fields(
         customers, dist_matrix,
@@ -136,6 +142,7 @@ def load_seoul_to_db(instance_dir, emergency_ratio=None, seed=42, dataset_id=Non
         "depot": depot,
         "customers": customers,
         "distance_matrix": dist_matrix,
+        "time_matrix": time_matrix,
         "capacity": parsed["capacity"],
         "node_count": len(all_nodes),
     }

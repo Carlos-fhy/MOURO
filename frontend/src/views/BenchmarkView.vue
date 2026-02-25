@@ -9,16 +9,23 @@
       style="margin-bottom: 16px"
     />
 
-    <template v-if="data">
-      <!-- 数据集信息 -->
-      <el-card shadow="hover" class="info-card">
-        <div class="dataset-info">
-          <span>基准数据集：<strong>{{ data.dataset }}</strong></span>
-          <span>客户数：<strong>{{ data.customer_count }}</strong></span>
-          <span>车辆容量：<strong>{{ data.vehicle_capacity }}</strong></span>
-          <span>权重 λ：<strong>[{{ data.lambdas.join(', ') }}]</strong></span>
-        </div>
-      </el-card>
+    <template v-if="allData.length">
+      <!-- 数据集切换 -->
+      <el-tabs v-model="activeTab" type="border-card" class="dataset-tabs">
+        <el-tab-pane
+          v-for="(ds, idx) in allData"
+          :key="idx"
+          :label="ds.dataset"
+          :name="String(idx)"
+        >
+          <!-- 数据集基本信息 -->
+          <div class="dataset-info">
+            <span>客户数：<strong>{{ ds.customer_count }}</strong></span>
+            <span>车辆容量：<strong>{{ ds.vehicle_capacity }}</strong></span>
+            <span>权重 λ：<strong>[{{ ds.lambdas.join(', ') }}]</strong></span>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
 
       <!-- 性能指标表 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
@@ -50,13 +57,10 @@
 
       <!-- 图表区域 -->
       <div class="charts-row">
-        <!-- 目标函数对比柱状图 -->
         <el-card shadow="hover" class="chart-card">
           <template #header>目标函数对比 (F1 / F2' / F3)</template>
           <v-chart :option="objectiveBarOption" autoresize style="height: 360px" />
         </el-card>
-
-        <!-- 准确率对比 -->
         <el-card shadow="hover" class="chart-card">
           <template #header>vs OR-Tools 准确率</template>
           <v-chart :option="accuracyBarOption" autoresize style="height: 360px" />
@@ -64,27 +68,29 @@
       </div>
 
       <div class="charts-row">
-        <!-- 收敛曲线 -->
         <el-card shadow="hover" class="chart-card">
           <template #header>收敛曲线对比</template>
           <v-chart :option="convergenceOption" autoresize style="height: 360px" />
         </el-card>
-
-        <!-- Pareto 散点图 -->
         <el-card shadow="hover" class="chart-card">
           <template #header>不同 λ 配置下的 Pareto 近似解</template>
           <v-chart :option="paretoOption" autoresize style="height: 360px" />
         </el-card>
       </div>
 
-      <!-- 运行耗时对比 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
         <template #header>平均运行耗时对比</template>
         <v-chart :option="timeBarOption" autoresize style="height: 300px" />
       </el-card>
+
+      <!-- 跨数据集准确率汇总 -->
+      <el-card shadow="hover" style="margin-bottom: 16px">
+        <template #header>改进ACO 各数据集准确率汇总</template>
+        <v-chart :option="crossDatasetOption" autoresize style="height: 300px" />
+      </el-card>
     </template>
 
-    <el-empty v-if="!data && !loading" description="未找到基准测试数据" />
+    <el-empty v-if="!allData.length && !loading" description="未找到基准测试数据" />
   </div>
 </template>
 
@@ -94,9 +100,9 @@ import VChart from 'vue-echarts'
 
 const loading = ref(false)
 const error = ref('')
-const data = ref(null)
+const allData = ref([])
+const activeTab = ref('0')
 
-// 算法颜色映射
 const COLORS = {
   '改进ACO': '#409EFF',
   '标准ACO': '#67C23A',
@@ -105,12 +111,20 @@ const COLORS = {
   'OR-Tools': '#909399'
 }
 
+// 当前选中的数据集
+const data = computed(() => {
+  const idx = parseInt(activeTab.value)
+  return allData.value[idx] || null
+})
+
 onMounted(async () => {
   loading.value = true
   try {
     const res = await fetch('/benchmark.json')
     if (!res.ok) throw new Error('加载失败')
-    data.value = await res.json()
+    const json = await res.json()
+    // 兼容旧格式（单个对象）和新格式（数组）
+    allData.value = Array.isArray(json) ? json : [json]
   } catch (e) {
     error.value = '无法加载基准测试数据：' + e.message
   } finally {
@@ -292,16 +306,50 @@ const timeBarOption = computed(() => {
     }]
   }
 })
+
+// 跨数据集：改进ACO 准确率汇总
+const crossDatasetOption = computed(() => {
+  if (!allData.value.length) return {}
+  const labels = []
+  const values = []
+  for (const ds of allData.value) {
+    const acc = ds.algorithms?.['改进ACO']?.accuracy_vs_ortools
+    if (acc != null) {
+      labels.push(ds.dataset.replace('Solomon ', ''))
+      values.push(acc)
+    }
+  }
+  return {
+    tooltip: { trigger: 'axis', formatter: '{b}: {c}%' },
+    grid: { left: 60, right: 20, bottom: 40, top: 20 },
+    xAxis: { type: 'category', data: labels },
+    yAxis: { type: 'value', name: '准确率 (%)', max: 100 },
+    series: [{
+      type: 'bar',
+      data: values.map(v => ({
+        value: v,
+        itemStyle: { color: v >= 80 ? '#67C23A' : v >= 60 ? '#E6A23C' : '#F56C6C' }
+      })),
+      label: { show: true, position: 'top', formatter: '{c}%' },
+      markLine: {
+        data: [{ yAxis: 80, name: '目标 80%' }],
+        lineStyle: { color: '#F56C6C', type: 'dashed' },
+        label: { formatter: '目标 80%' }
+      }
+    }]
+  }
+})
 </script>
 
 <style scoped>
-.info-card {
+.dataset-tabs {
   margin-bottom: 16px;
 }
 .dataset-info {
   display: flex;
   gap: 32px;
   flex-wrap: wrap;
+  padding: 4px 0;
 }
 .charts-row {
   display: flex;

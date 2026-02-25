@@ -23,14 +23,6 @@
         <el-icon><Cpu /></el-icon>
         <span>任务求解</span>
       </el-menu-item>
-      <el-menu-item index="/result">
-        <el-icon><DataAnalysis /></el-icon>
-        <span>决策看板</span>
-      </el-menu-item>
-      <el-menu-item index="/compare">
-        <el-icon><TrendCharts /></el-icon>
-        <span>算法对比</span>
-      </el-menu-item>
       <el-menu-item index="/benchmark">
         <el-icon><Histogram /></el-icon>
         <span>性能测试</span>

@@ -27,18 +27,6 @@ const routes = [
     meta: { title: '任务求解' }
   },
   {
-    path: '/result',
-    name: 'Result',
-    component: () => import('../views/ResultView.vue'),
-    meta: { title: '决策看板' }
-  },
-  {
-    path: '/compare',
-    name: 'Compare',
-    component: () => import('../views/CompareView.vue'),
-    meta: { title: '算法对比' }
-  },
-  {
     path: '/benchmark',
     name: 'Benchmark',
     component: () => import('../views/BenchmarkView.vue'),

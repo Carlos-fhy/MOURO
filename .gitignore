@@ -28,7 +28,7 @@ npm-debug.log*
 Thumbs.db
 
 # SQLite
-*.db
+# *.db
 
 # 构建产物
 frontend/dist/

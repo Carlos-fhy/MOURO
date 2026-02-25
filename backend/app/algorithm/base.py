@@ -56,6 +56,15 @@ class BaseAlgorithm:
         self.patience = params.get("patience", 50)
         self.early_stop_threshold = params.get("early_stop_threshold", 1e-6)
 
+        # 动态种子：未指定 seed 时，根据 λ 生成不同种子
+        # 同一 λ 配置可复现，不同 λ 产生不同搜索路径
+        if "seed" not in params:
+            self._default_seed = hash(tuple(
+                round(v, 4) for v in self.lambdas
+            )) % (2**31)
+        else:
+            self._default_seed = params["seed"]
+
         # 构建客户ID到索引的映射（距离矩阵中的行列索引）
         # 约定：索引0 = depot，索引1~N = customers（按列表顺序）
         self.n_customers = len(customers)

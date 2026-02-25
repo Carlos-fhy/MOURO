@@ -39,6 +39,7 @@ def _build_params(body):
 
     params = {
         "vehicle_capacity": capacity,
+        "lambdas": lambdas,
         "lambda1": lambdas[0],
         "lambda2": lambdas[1],
         "lambda3": lambdas[2],
