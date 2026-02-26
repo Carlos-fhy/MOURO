@@ -63,11 +63,12 @@ def two_opt_routes(routes, distance_matrix, id_to_idx):
     return [two_opt_improve(r, distance_matrix, id_to_idx) for r in routes]
 
 
-def relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacity):
+def relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacity,
+                     max_rounds=50):
     """路线间 relocate 算子 —— 尝试将客户从一条路线迁移到另一条路线的最佳位置
 
-    反复扫描所有路线对，找到能减少总距离的迁移操作并执行，
-    直到无法继续改善为止。
+    采用 first-improvement 策略：找到第一个能改善的迁移就立即执行，
+    避免 best-improvement 的全量扫描开销。设有最大轮次上限防止极端情况。
 
     参数:
         routes: 路线列表
@@ -75,23 +76,27 @@ def relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacit
         id_to_idx: 节点ID到矩阵索引映射
         customers_dict: 客户ID到信息的映射
         capacity: 车辆容量
+        max_rounds: 最大迭代轮次（默认50）
     返回:
         优化后的路线列表
     """
     routes = [list(r) for r in routes]
-    improved = True
 
-    while improved:
-        improved = False
-        best_saving = -1e-10
-        best_move = None
+    # 预计算并缓存每条路线的载重
+    loads = [
+        sum(_get_demand(r[k], customers_dict) for k in range(1, len(r) - 1))
+        for r in routes
+    ]
+
+    for _ in range(max_rounds):
+        moved = False
 
         for ri in range(len(routes)):
             if len(routes[ri]) <= 3:
                 continue
             for pos_i in range(1, len(routes[ri]) - 1):
                 cid = routes[ri][pos_i]
-                # 移除 cid 后的距离节省
+                demand = _get_demand(cid, customers_dict)
                 saving_remove = _removal_saving(
                     routes[ri], pos_i, distance_matrix, id_to_idx
                 )
@@ -99,30 +104,28 @@ def relocate_improve(routes, distance_matrix, id_to_idx, customers_dict, capacit
                 for rj in range(len(routes)):
                     if ri == rj:
                         continue
-                    # 检查容量约束
-                    demand = _get_demand(cid, customers_dict)
-                    route_load = sum(
-                        _get_demand(routes[rj][k], customers_dict)
-                        for k in range(1, len(routes[rj]) - 1)
-                    )
-                    if route_load + demand > capacity:
+                    # 用缓存的载重检查容量约束
+                    if loads[rj] + demand > capacity:
                         continue
 
-                    # 找 rj 中最佳插入位置
                     best_insert_cost, best_insert_pos = _best_insertion(
                         routes[rj], cid, distance_matrix, id_to_idx
                     )
-                    total_saving = saving_remove - best_insert_cost
-                    if total_saving > best_saving:
-                        best_saving = total_saving
-                        best_move = (ri, pos_i, rj, best_insert_pos)
+                    # first-improvement：找到改善立即执行
+                    if saving_remove - best_insert_cost > 1e-10:
+                        routes[ri].pop(pos_i)
+                        routes[rj].insert(best_insert_pos, cid)
+                        loads[ri] -= demand
+                        loads[rj] += demand
+                        moved = True
+                        break  # 跳出 rj 循环，重新扫描
+                if moved:
+                    break  # 跳出 pos_i 循环
+            if moved:
+                break  # 跳出 ri 循环，开始新一轮
 
-        if best_move:
-            ri, pos_i, rj, insert_pos = best_move
-            cid = routes[ri][pos_i]
-            routes[ri].pop(pos_i)
-            routes[rj].insert(insert_pos, cid)
-            improved = True
+        if not moved:
+            break
 
     # 移除空路线（只剩 depot→depot）
     routes = [r for r in routes if len(r) > 2]
