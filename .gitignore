@@ -32,3 +32,8 @@ Thumbs.db
 
 # 构建产物
 frontend/dist/
+
+# 项目文档（不上传）
+CLAUDE.md
+progress.txt
+docs/
