@@ -3,7 +3,8 @@ import numpy as np
 from scipy.stats import truncnorm
 
 
-def generate_fields(customers, distance_matrix, emergency_ratio=None, seed=42):
+def generate_fields(customers, distance_matrix, emergency_ratio=None, seed=42,
+                     time_matrix=None):
     """
     为首尔数据集客户生成缺失字段（需求量、服务时间、应急等级、时间窗）
 
@@ -12,6 +13,7 @@ def generate_fields(customers, distance_matrix, emergency_ratio=None, seed=42):
         distance_matrix: 距离矩阵（含 depot，索引0为depot）
         emergency_ratio: 应急等级比例 dict，如 {"medical": 10, "fresh": 20, "normal": 70}
         seed: 随机种子，保证可复现
+        time_matrix: 时间矩阵（可选，提供时用于生成时间窗，否则用距离矩阵）
     返回:
         修改后的客户列表（原地修改并返回）
     """
@@ -35,8 +37,9 @@ def generate_fields(customers, distance_matrix, emergency_ratio=None, seed=42):
         # 服务时间 = 5 + 0.1 × 需求量（参考 PRD.md 第6.2节）
         c["service_time"] = 5.0 + 0.1 * demands[i]
 
-    # --- 4. 生成时间窗（基于行驶时间反推）---
-    _generate_time_windows(customers, distance_matrix, rng)
+    # --- 4. 生成时间窗（基于行驶时间反推，优先用 time_matrix）---
+    tw_matrix = time_matrix if time_matrix is not None else distance_matrix
+    _generate_time_windows(customers, tw_matrix, rng)
 
     return customers
 

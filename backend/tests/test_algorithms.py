@@ -109,7 +109,8 @@ class TestImprovedACO:
         msgs = []
         result = solver.solve(callback=lambda m: msgs.append(m))
         assert len(msgs) > 0, "回调应至少被调用一次"
-        assert msgs[0]["type"] == "progress"
+        progress_msgs = [m for m in msgs if m.get("type") == "progress"]
+        assert len(progress_msgs) > 0, "应至少有一条 progress 消息"
 
 
 # ── 标准蚁群算法测试 ──

@@ -1,5 +1,6 @@
 # 算法基类与统一数据结构定义
 from dataclasses import dataclass, field
+import time
 
 
 @dataclass
@@ -55,6 +56,16 @@ class BaseAlgorithm:
         self.max_iterations = params.get("max_iterations", 200)
         self.patience = params.get("patience", 50)
         self.early_stop_threshold = params.get("early_stop_threshold", 1e-6)
+        # 总时限（秒），为 None 表示不限时
+        self.max_runtime_sec = params.get("max_runtime_sec")
+        if self.max_runtime_sec is not None:
+            try:
+                self.max_runtime_sec = float(self.max_runtime_sec)
+            except (TypeError, ValueError):
+                self.max_runtime_sec = None
+            if self.max_runtime_sec is not None and self.max_runtime_sec <= 0:
+                self.max_runtime_sec = None
+        self._start_time = None
 
         # 动态种子：未指定 seed 时，根据 λ 生成不同种子
         # 同一 λ 配置可复现，不同 λ 产生不同搜索路径
@@ -82,3 +93,18 @@ class BaseAlgorithm:
             SolutionResult 实例
         """
         raise NotImplementedError("子类必须实现 solve 方法")
+
+    def _start_timer(self):
+        """开始计时，用于总时限控制。"""
+        self._start_time = time.time()
+
+    def _elapsed_sec(self):
+        if self._start_time is None:
+            return 0.0
+        return time.time() - self._start_time
+
+    def _time_exceeded(self):
+        """是否已超过总时限。"""
+        if self.max_runtime_sec is None:
+            return False
+        return self._elapsed_sec() >= self.max_runtime_sec

@@ -203,6 +203,7 @@ async function handleStart() {
 function connectSse(taskId) {
   eventSource = createSseConnection(`/api/solve/stream/${taskId}`, {
     onMessage(data) {
+      if (data.type === 'heartbeat') return
       solveStore.logs.push(data)
     },
     async onDone(data) {

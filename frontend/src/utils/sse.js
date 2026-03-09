@@ -5,10 +5,18 @@ export function createSseConnection(url, { onMessage, onDone, onError }) {
   const token = localStorage.getItem('token')
   const fullUrl = `${url}${url.includes('?') ? '&' : '?'}token=${token}`
   const eventSource = new EventSource(fullUrl)
+  let reconnectErrors = 0
+
+  eventSource.onopen = () => {
+    reconnectErrors = 0
+  }
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
+      if (data.type === 'heartbeat') {
+        return
+      }
       if (data.type === 'done') {
         onDone(data)
         eventSource.close()
@@ -25,8 +33,12 @@ export function createSseConnection(url, { onMessage, onDone, onError }) {
   }
 
   eventSource.onerror = () => {
-    onError('SSE 连接异常')
-    eventSource.close()
+    // EventSource 自带自动重连，不要立刻 close。
+    reconnectErrors += 1
+    if (reconnectErrors >= 5) {
+      onError('SSE 连接异常（多次重连失败）')
+      eventSource.close()
+    }
   }
 
   return eventSource

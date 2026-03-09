@@ -80,7 +80,8 @@ def stream(task_id):
         stream_with_context(generate()),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache",
-                 "X-Accel-Buffering": "no"},
+                 "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
     )
 
 

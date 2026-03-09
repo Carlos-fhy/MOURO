@@ -2,6 +2,7 @@
 import numpy as np
 from app.algorithm.base import BaseAlgorithm, SolutionResult
 from app.algorithm.greedy import GreedySolver
+from app.algorithm.local_search import repair_late_customers
 from app.algorithm.precheck import precheck_reachability
 from app.utils.objective import (
     build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
@@ -49,6 +50,8 @@ class GeneticAlgorithm(BaseAlgorithm):
             SolutionResult 实例
         """
         rng = np.random.default_rng(self.seed)
+        self._start_timer()
+        timed_out = False
 
         # ---- 1. 预检：剔除不可达的硬时间窗客户 ----
         reachable, unreachable = precheck_reachability(
@@ -80,6 +83,9 @@ class GeneticAlgorithm(BaseAlgorithm):
 
         # ---- 4. 主迭代循环 ----
         for iteration in range(self.max_iterations):
+            if self._time_exceeded():
+                timed_out = True
+                break
             # 评估当前种群适应度
             fitnesses, pop_data = self._evaluate_population(
                 population, depot_id, working_dict
@@ -151,6 +157,9 @@ class GeneticAlgorithm(BaseAlgorithm):
 
             # 填充剩余种群
             while len(new_population) < self.population_size:
+                if self._time_exceeded():
+                    timed_out = True
+                    break
                 # 轮盘赌选择两个父代
                 p1 = self._roulette_select(population, fit_for_select, rng)
                 p2 = self._roulette_select(population, fit_for_select, rng)
@@ -169,7 +178,16 @@ class GeneticAlgorithm(BaseAlgorithm):
                 if len(new_population) < self.population_size:
                     new_population.append(c2)
 
-            population = new_population
+            population = new_population if new_population else population
+            if timed_out:
+                break
+
+        if timed_out and callback:
+            callback({
+                "type": "timeout",
+                "message": f"达到总时限 {self.max_runtime_sec:.0f}s，返回当前最优解",
+                "elapsed_sec": round(self._elapsed_sec(), 2),
+            })
 
         # ---- 6. 构建最终结果 ----
         if best_routes is None:
@@ -180,6 +198,23 @@ class GeneticAlgorithm(BaseAlgorithm):
             )
             greedy_result = greedy.solve()
             best_routes = greedy_result["routes"]
+
+        # 与 ACO 输出口径对齐：末尾做一次迟到修复
+        best_routes = repair_late_customers(
+            best_routes, self.time_matrix, self.id_to_idx, working_dict
+        )
+
+        # 用修复后的路线重算目标值
+        final_eval = self._evaluate_routes(best_routes, working_dict)
+        best_f1 = final_eval["f1"]
+        best_f2 = final_eval["f2"]
+        best_f3 = final_eval["f3"]
+        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
+            best_z = calculate_z(
+                best_f1, best_f2, best_f3,
+                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
+                self.lambdas
+            )
 
         final_schedule = build_schedule(
             best_routes, working_dict, self.time_matrix,
@@ -291,7 +326,9 @@ class GeneticAlgorithm(BaseAlgorithm):
         return {"routes": routes, "f1": f1, "f2": f2, "f3": f3}
 
     def _decode(self, chromosome, depot_id):
-        """将染色体（客户ID排列）按容量约束分割为路线列表
+        """将染色体按容量+medical硬时间窗约束分割为路线列表
+
+        按顺序扫描排列，当容量超限或新增 medical 节点迟到时断开新路线。
 
         参数:
             chromosome: 客户ID排列，如 [3,7,1,5]
@@ -302,28 +339,81 @@ class GeneticAlgorithm(BaseAlgorithm):
         routes = []
         route = [depot_id]
         load = 0.0
+        current_id = depot_id
+        current_time = 0.0
 
         for cid in chromosome:
-            demand = self.customers_dict.get(cid, {}).get(
-                "demand", self.customers_dict.get(cid, {}).get(
-                    "demand_weight", 0
-                )
+            c_info = self.customers_dict.get(cid, {})
+            demand = c_info.get(
+                "demand", c_info.get("demand_weight", 0)
             )
-            # 若加入当前客户会超载，则关闭当前路线，开启新路线
-            if load + demand > self.vehicle_capacity:
+
+            feasible, next_time = self._try_append_customer(
+                current_id, current_time, load, cid, c_info
+            )
+
+            # 当前路线不可行：断开后从 depot 重试
+            if (not feasible) and len(route) > 1:
                 route.append(depot_id)
                 routes.append(route)
                 route = [depot_id]
                 load = 0.0
+                current_id = depot_id
+                current_time = 0.0
+                feasible, next_time = self._try_append_customer(
+                    current_id, current_time, load, cid, c_info
+                )
+
+            # 极端兜底：仍不可行时强制单点成路，保证个体可解码
+            if not feasible:
+                if len(route) > 1:
+                    route.append(depot_id)
+                    routes.append(route)
+                routes.append([depot_id, cid, depot_id])
+                route = [depot_id]
+                load = 0.0
+                current_id = depot_id
+                current_time = 0.0
+                continue
 
             route.append(cid)
             load += demand
+            current_id = cid
+            current_time = next_time
 
         # 关闭最后一条路线
-        route.append(depot_id)
-        routes.append(route)
+        if len(route) > 1:
+            route.append(depot_id)
+            routes.append(route)
 
         return routes
+
+    def _try_append_customer(self, current_id, current_time, load, cid, c_info):
+        """检查追加客户是否可行，并返回追加后的时间。"""
+        demand = c_info.get("demand", c_info.get("demand_weight", 0))
+        if load + demand > self.vehicle_capacity:
+            return False, current_time
+
+        curr_idx = self.id_to_idx[current_id]
+        next_idx = self.id_to_idx[cid]
+        travel = self.time_matrix[curr_idx][next_idx]
+        arrival = current_time + travel
+
+        et = c_info.get("early_time", 0)
+        lt = c_info.get("late_time", float("inf"))
+        st = c_info.get("service_time", 0)
+        level = c_info.get("emergency_level", "normal")
+
+        # 迟到不可行：所有等级均触发路线分割，开新车从 t=0 准时送达
+        if arrival > lt:
+            return False, current_time
+
+        if arrival < et and level == "medical":
+            next_time = et + st
+        else:
+            next_time = max(arrival, et) + st if level == "medical" else arrival + st
+
+        return True, next_time
 
     def _ox_crossover(self, p1, p2, rng):
         """顺序交叉 OX（Order Crossover）

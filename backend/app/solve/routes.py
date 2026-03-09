@@ -43,6 +43,7 @@ def _build_params(body):
         "lambda1": lambdas[0],
         "lambda2": lambdas[1],
         "lambda3": lambdas[2],
+        "max_runtime_sec": Config.DEFAULT_MAX_RUNTIME_SEC,
         "alpha_base": Config.ALPHA_BASE,
         "beta_base": Config.BETA_BASE,
         "fixed_cost": Config.VEHICLE_FIXED_COST,
@@ -141,7 +142,8 @@ def stream(task_id):
         stream_with_context(generate()),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache",
-                 "X-Accel-Buffering": "no"},
+                 "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
     )
 
 

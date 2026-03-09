@@ -61,12 +61,12 @@ class TaskManager:
         with self._lock:
             return self._tasks.get(task_id)
 
-    def iter_messages(self, task_id, timeout=60):
+    def iter_messages(self, task_id, timeout=8):
         """迭代获取任务的 SSE 消息
 
         参数:
             task_id: 任务ID
-            timeout: 单条消息等待超时（秒）
+            timeout: 单条消息等待超时（秒），默认8秒用于更频繁发送心跳防止前端超时
         生成:
             dict 消息，直到收到 None 哨兵值
         """
@@ -79,6 +79,10 @@ class TaskManager:
             try:
                 msg = queue.get(timeout=timeout)
             except Empty:
+                # 超时但任务仍在运行（如局部搜索阶段），发送心跳保持连接
+                if not info["done"]:
+                    yield {"type": "heartbeat"}
+                    continue
                 break
             if msg is None:
                 break

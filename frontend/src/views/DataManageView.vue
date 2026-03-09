@@ -114,10 +114,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useDataStore } from '../stores/data'
+import { useSolveStore } from '../stores/solve'
+import { useResultStore } from '../stores/result'
 import { getSolomonList, getSeoulList, loadDataset, getCustomers, getDepot } from '../api/data'
 import RouteMap from '../components/map/RouteMap.vue'
 
 const dataStore = useDataStore()
+const solveStore = useSolveStore()
+const resultStore = useResultStore()
 const loading = ref(false)
 const ratio = ref({ medical: 10, fresh: 20, normal: 70 })
 
@@ -166,6 +170,9 @@ async function handleLoad() {
       if (custRes.success) dataStore.customers = custRes.data.customers
       if (depotRes.success) dataStore.depot = depotRes.data.depot
       dataStore.matrixInfo = res.data.matrix_summary || null
+      // 清除旧的求解结果，避免数据集切换后显示过期结果
+      solveStore.reset()
+      resultStore.reset()
       ElMessage.success('数据加载成功')
     }
   } catch {

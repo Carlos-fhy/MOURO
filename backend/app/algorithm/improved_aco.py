@@ -3,7 +3,7 @@ import numpy as np
 from app.algorithm.base import BaseAlgorithm, SolutionResult
 from app.algorithm.greedy import GreedySolver
 from app.algorithm.precheck import precheck_reachability
-from app.algorithm.local_search import full_local_search
+from app.algorithm.local_search import full_local_search, repair_late_customers, tw_attractiveness
 from app.utils.objective import (
     build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
 )
@@ -139,8 +139,9 @@ class Ant:
             level = c_info.get("emergency_level", "normal")
             lt = c_info.get("late_time", float("inf"))
 
-            # 硬时间窗迟到不可行
-            if level == "medical" and arrival > lt:
+            # 迟到不可行：所有等级的客户到达超过 LT 均跳过，
+            # 迫使蚂蚁关闭当前路线、开新车从 t=0 出发准时送达
+            if arrival > lt:
                 continue
 
             # 计算转移概率分子
@@ -150,6 +151,9 @@ class Ant:
             et = self.eta_time[curr_idx][c_idx] ** self.delta
 
             score = tc * ec * tt * et
+            # 时间窗吸引力因子：偏离时间窗越远，score 越低
+            et_val = c_info.get("early_time", 0)
+            score *= tw_attractiveness(arrival, et_val, lt, level)
             if score > 0:
                 candidates.append(cid)
                 scores.append(score)
@@ -186,6 +190,7 @@ class ImprovedACO(BaseAlgorithm):
         self.fixed_cost = params.get("fixed_cost", 200)
         self.cost_per_km = params.get("cost_per_km", 5.0)
         self.seed = self._default_seed
+        self.status_interval = max(1, int(params.get("status_interval", 10)))
 
         self.n = self.n_customers + 1  # 矩阵维度（depot + customers）
         self.customers_dict = {c["id"]: c for c in self.customers}
@@ -199,6 +204,8 @@ class ImprovedACO(BaseAlgorithm):
             SolutionResult
         """
         rng = np.random.default_rng(self.seed)
+        self._start_timer()
+        timed_out = False
 
         # 1. 预检：剔除不可达的硬时间窗客户
         reachable, unreachable = precheck_reachability(
@@ -260,12 +267,18 @@ class ImprovedACO(BaseAlgorithm):
 
         # 5. 主迭代循环
         for iteration in range(self.max_iterations):
+            if self._time_exceeded():
+                timed_out = True
+                break
             iter_best_routes = None
             iter_best_z = float("inf")
             iter_best_f1 = iter_best_f2 = iter_best_f3 = 0.0
 
             # 所有蚂蚁构建解
-            for _ in range(self.ant_count):
+            for ant_idx in range(self.ant_count):
+                if self._time_exceeded():
+                    timed_out = True
+                    break
                 ant = Ant(
                     working_customers, self.depot["id"],
                     self.distance_matrix, self.time_matrix,
@@ -302,12 +315,33 @@ class ImprovedACO(BaseAlgorithm):
                     iter_best_routes = routes
                     iter_best_f1, iter_best_f2, iter_best_f3 = f1, f2, f3
 
+
+            if timed_out:
+                break
+
             # 本轮最优解执行完整局部搜索（2-opt + relocate）
             if iter_best_routes:
+                if callback:
+                    callback({
+                        "type": "status",
+                        "iteration": iteration + 1,
+                        "phase": "local_search",
+                        "done": 0,
+                        "total": 1,
+                    })
                 iter_best_routes = full_local_search(
                     iter_best_routes, self.distance_matrix, self.id_to_idx,
-                    working_dict, self.vehicle_capacity
+                    working_dict, self.vehicle_capacity,
+                    time_matrix=self.time_matrix
                 )
+                if callback:
+                    callback({
+                        "type": "status",
+                        "iteration": iteration + 1,
+                        "phase": "local_search",
+                        "done": 1,
+                        "total": 1,
+                    })
                 # 重新评估 2-opt 后的解
                 schedule = build_schedule(
                     iter_best_routes, working_dict, self.time_matrix,
@@ -362,14 +396,40 @@ class ImprovedACO(BaseAlgorithm):
             if no_improve_count >= self.patience:
                 break
 
+        if timed_out and callback:
+            callback({
+                "type": "timeout",
+                "message": f"达到总时限 {self.max_runtime_sec:.0f}s，返回当前最优解",
+                "elapsed_sec": round(self._elapsed_sec(), 2),
+            })
+
         # 9. 构建最终结果
         if best_routes is None:
             best_routes = greedy_result["routes"]
+
+        # 后处理：修复迟到客户（与 GA/SA 统一口径）
+        best_routes = repair_late_customers(
+            best_routes, self.time_matrix, self.id_to_idx, working_dict
+        )
 
         final_schedule = build_schedule(
             best_routes, working_dict, self.time_matrix,
             self.id_to_idx, self.alpha_base, self.beta_base
         )
+        best_f1 = calculate_f1(
+            best_routes, self.distance_matrix, self.id_to_idx,
+            self.fixed_cost, self.cost_per_km
+        )
+        best_f2 = calculate_f2(final_schedule, working_dict)
+        best_f3 = calculate_f3(final_schedule, working_dict)
+        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
+            best_z = calculate_z(
+                best_f1, best_f2, best_f3,
+                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
+                self.lambdas
+            )
+        elif not np.isfinite(best_z):
+            best_z = 0.0
         vehicles_used = sum(1 for r in best_routes if len(r) > 2)
 
         return SolutionResult(

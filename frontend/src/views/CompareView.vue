@@ -189,6 +189,7 @@ async function handleStart() {
 function connectSse(taskId) {
   eventSource = createSseConnection(`/api/compare/stream/${taskId}`, {
     onMessage(data) {
+      if (data.type === 'heartbeat') return
       logs.value.push(data)
     },
     async onDone() {

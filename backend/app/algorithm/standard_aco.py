@@ -3,6 +3,7 @@ import numpy as np
 from app.algorithm.base import BaseAlgorithm, SolutionResult
 from app.algorithm.greedy import GreedySolver
 from app.algorithm.precheck import precheck_reachability
+from app.algorithm.local_search import repair_late_customers, tw_attractiveness
 from app.utils.objective import (
     build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
 )
@@ -20,7 +21,7 @@ class StandardACO(BaseAlgorithm):
 
     def __init__(self, customers, depot, distance_matrix, time_matrix, params):
         super().__init__(customers, depot, distance_matrix, time_matrix, params)
-        self.ant_count = params.get("ant_count") or self.n_customers
+        self.ant_count = params.get("ant_count") or min(self.n_customers, 50)
         self.rho = params.get("rho_cost", 0.1)
         self.alpha_param = params.get("alpha", 1.0)
         self.beta_param = params.get("beta", 2.0)
@@ -29,11 +30,14 @@ class StandardACO(BaseAlgorithm):
         self.fixed_cost = params.get("fixed_cost", 200)
         self.cost_per_km = params.get("cost_per_km", 5.0)
         self.seed = self._default_seed
+        self.status_interval = max(1, int(params.get("status_interval", 10)))
         self.n = self.n_customers + 1
 
     def solve(self, callback=None):
         """执行标准蚁群算法求解"""
         rng = np.random.default_rng(self.seed)
+        self._start_timer()
+        timed_out = False
 
         # 预检
         reachable, unreachable = precheck_reachability(
@@ -65,10 +69,16 @@ class StandardACO(BaseAlgorithm):
         no_improve = 0
 
         for iteration in range(self.max_iterations):
+            if self._time_exceeded():
+                timed_out = True
+                break
             all_routes = []
             all_z = []
 
-            for _ in range(self.ant_count):
+            for ant_idx in range(self.ant_count):
+                if self._time_exceeded():
+                    timed_out = True
+                    break
                 routes = self._construct(working, working_dict, tau, eta, rng)
 
                 sched = build_schedule(routes, working_dict, self.time_matrix,
@@ -87,6 +97,10 @@ class StandardACO(BaseAlgorithm):
                                 (f3_min, f3_max), self.lambdas)
                 all_routes.append((routes, f1, f2, f3, z))
                 all_z.append(z)
+
+
+            if timed_out or not all_routes:
+                break
 
             # 本轮最优
             idx_best = int(np.argmin(all_z))
@@ -122,11 +136,33 @@ class StandardACO(BaseAlgorithm):
             if no_improve >= self.patience:
                 break
 
+        if timed_out and callback:
+            callback({
+                "type": "timeout",
+                "message": f"达到总时限 {self.max_runtime_sec:.0f}s，返回当前最优解",
+                "elapsed_sec": round(self._elapsed_sec(), 2),
+            })
+
         if best_routes is None:
             best_routes = greedy_result["routes"]
 
+        # 后处理：修复迟到客户（与 GA/SA 统一口径）
+        best_routes = repair_late_customers(
+            best_routes, self.time_matrix, self.id_to_idx, working_dict
+        )
+
         final_sched = build_schedule(best_routes, working_dict, self.time_matrix,
                                      self.id_to_idx, self.alpha_base, self.beta_base)
+        best_f1 = calculate_f1(best_routes, self.distance_matrix, self.id_to_idx,
+                               self.fixed_cost, self.cost_per_km)
+        best_f2 = calculate_f2(final_sched, working_dict)
+        best_f3 = calculate_f3(final_sched, working_dict)
+        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
+            best_z = calculate_z(best_f1, best_f2, best_f3,
+                                 (f1_min, f1_max), (f2_min, f2_max),
+                                 (f3_min, f3_max), self.lambdas)
+        elif not np.isfinite(best_z):
+            best_z = 0.0
         vn = sum(1 for r in best_routes if len(r) > 2)
 
         return SolutionResult(
@@ -162,11 +198,18 @@ class StandardACO(BaseAlgorithm):
 
                     travel = self.time_matrix[curr_idx][c_idx]
                     arrival = current_time + travel
-                    if c.get("emergency_level") == "medical" and arrival > c.get("late_time", float("inf")):
+                    level = c.get("emergency_level", "normal")
+                    et_j = c.get("early_time", 0)
+                    lt = c.get("late_time", float("inf"))
+
+                    # 迟到不可行：所有等级均跳过，开新车从 t=0 准时送达
+                    if arrival > lt:
                         continue
 
                     score = (tau[curr_idx][c_idx] ** self.alpha_param *
                              eta[curr_idx][c_idx] ** self.beta_param)
+                    # 时间窗吸引力因子：偏离时间窗越远，score 越低
+                    score *= tw_attractiveness(arrival, et_j, lt, level)
                     if score > 0:
                         candidates.append(cid)
                         scores.append(score)
@@ -183,6 +226,7 @@ class StandardACO(BaseAlgorithm):
                 travel = self.time_matrix[curr_idx][c_idx]
                 arrival = current_time + travel
                 et = c_info.get("early_time", 0)
+                lt = c_info.get("late_time", float("inf"))
                 st = c_info.get("service_time", 0)
                 level = c_info.get("emergency_level", "normal")
 

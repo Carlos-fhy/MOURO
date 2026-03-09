@@ -28,6 +28,15 @@ watch(() => props.logs.length, () => {
 // 格式化日志消息
 function formatLog(log) {
   if (typeof log === 'string') return log
+  if (log.type === 'status') {
+    if (log.phase === 'construct') {
+      return `[迭代 ${log.iteration}] 构解进度 ${log.done}/${log.total}`
+    }
+    if (log.phase === 'local_search') {
+      return `[迭代 ${log.iteration}] 局部搜索 ${log.done === 0 ? '开始' : '完成'}`
+    }
+    return `[迭代 ${log.iteration}] ${log.phase ?? '阶段'} ${log.done ?? '-'} / ${log.total ?? '-'}`
+  }
   if (log.type === 'progress') {
     return `[迭代 ${log.iteration}] Z=${log.best_z?.toFixed(4) ?? '-'} F1=${log.best_f1?.toFixed(1) ?? '-'} F2'=${log.best_f2?.toFixed(1) ?? '-'} F3=${log.best_f3?.toFixed(1) ?? '-'} 车辆=${log.vehicles_used ?? '-'}`
   }

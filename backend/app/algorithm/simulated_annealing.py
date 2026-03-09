@@ -4,6 +4,7 @@ import numpy as np
 
 from app.algorithm.base import BaseAlgorithm, SolutionResult
 from app.algorithm.greedy import GreedySolver
+from app.algorithm.local_search import repair_late_customers
 from app.algorithm.precheck import precheck_reachability
 from app.utils.objective import (
     build_schedule,
@@ -47,6 +48,7 @@ class SimulatedAnnealing(BaseAlgorithm):
         self.beta_base = params.get("beta_base", 2.0)
         self.fixed_cost = params.get("fixed_cost", 200)
         self.cost_per_km = params.get("cost_per_km", 5.0)
+        self.customers_dict = {c["id"]: c for c in self.customers}
 
     def solve(self, callback=None):
         """模拟退火主循环
@@ -57,6 +59,8 @@ class SimulatedAnnealing(BaseAlgorithm):
             SolutionResult 实例
         """
         rng = np.random.RandomState(self.seed)
+        self._start_timer()
+        timed_out = False
         depot_id = self.depot["id"]
 
         # ---- 预检：剔除不可达的硬时间窗客户 ----
@@ -103,6 +107,9 @@ class SimulatedAnnealing(BaseAlgorithm):
         temperature = self.initial_temperature
 
         for iteration in range(1, self.max_iterations + 1):
+            if self._time_exceeded():
+                timed_out = True
+                break
             # 温度过低则提前终止
             if temperature < self.min_temperature:
                 break
@@ -191,6 +198,25 @@ class SimulatedAnnealing(BaseAlgorithm):
             # ---- 降温：T = T * cooling_rate ----
             temperature *= self.cooling_rate
 
+        if timed_out and callback:
+            callback({
+                "type": "timeout",
+                "message": f"达到总时限 {self.max_runtime_sec:.0f}s，返回当前最优解",
+                "elapsed_sec": round(self._elapsed_sec(), 2),
+            })
+
+        # ---- 与 ACO 输出口径对齐：末尾做一次迟到修复并重算指标 ----
+        best_routes = repair_late_customers(
+            best_routes, self.time_matrix, self.id_to_idx, working_dict
+        )
+        best_f1, best_f2, best_f3 = self._evaluate(best_routes, working_dict)
+        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
+            best_z = calculate_z(
+                best_f1, best_f2, best_f3,
+                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
+                self.lambdas
+            )
+
         # ---- 构造最终调度明细 ----
         final_schedule = build_schedule(
             best_routes, working_dict,
@@ -231,9 +257,9 @@ class SimulatedAnnealing(BaseAlgorithm):
         return seq
 
     def _decode(self, sequence):
-        """将客户ID排列按容量约束分割为路线列表
+        """将客户ID排列按容量+medical硬时间窗约束分割为路线列表
 
-        按顺序扫描排列，累加需求量，超过车辆容量时断开新路线。
+        按顺序扫描排列，当容量超限或新增 medical 节点迟到时断开新路线。
         每条路线首尾添加 depot。
 
         参数:
@@ -242,28 +268,47 @@ class SimulatedAnnealing(BaseAlgorithm):
             路线列表，如 [[0,3,7,0], [0,1,5,0]]
         """
         depot_id = self.depot["id"]
-        # 构建客户需求量映射
-        demand_map = {}
-        for c in self.customers:
-            cid = c["id"]
-            demand_map[cid] = c.get(
-                "demand", c.get("demand_weight", 0)
-            )
 
         routes = []
         current_route = [depot_id]
         current_load = 0.0
+        current_id = depot_id
+        current_time = 0.0
 
         for cid in sequence:
-            d = demand_map.get(cid, 0)
-            if current_load + d > self.vehicle_capacity:
-                # 当前路线已满，关闭并开启新路线
+            c_info = self.customers_dict.get(cid, {})
+            d = c_info.get("demand", c_info.get("demand_weight", 0))
+
+            feasible, next_time = self._try_append_customer(
+                current_id, current_time, current_load, cid, c_info
+            )
+
+            if (not feasible) and len(current_route) > 1:
                 current_route.append(depot_id)
                 routes.append(current_route)
                 current_route = [depot_id]
                 current_load = 0.0
+                current_id = depot_id
+                current_time = 0.0
+                feasible, next_time = self._try_append_customer(
+                    current_id, current_time, current_load, cid, c_info
+                )
+
+            if not feasible:
+                if len(current_route) > 1:
+                    current_route.append(depot_id)
+                    routes.append(current_route)
+                routes.append([depot_id, cid, depot_id])
+                current_route = [depot_id]
+                current_load = 0.0
+                current_id = depot_id
+                current_time = 0.0
+                continue
+
             current_route.append(cid)
             current_load += d
+            current_id = cid
+            current_time = next_time
 
         # 关闭最后一条路线
         if len(current_route) > 1:
@@ -271,6 +316,33 @@ class SimulatedAnnealing(BaseAlgorithm):
             routes.append(current_route)
 
         return routes
+
+    def _try_append_customer(self, current_id, current_time, load, cid, c_info):
+        """检查追加客户是否可行，并返回追加后的时间。"""
+        demand = c_info.get("demand", c_info.get("demand_weight", 0))
+        if load + demand > self.vehicle_capacity:
+            return False, current_time
+
+        curr_idx = self.id_to_idx[current_id]
+        next_idx = self.id_to_idx[cid]
+        travel = self.time_matrix[curr_idx][next_idx]
+        arrival = current_time + travel
+
+        et = c_info.get("early_time", 0)
+        lt = c_info.get("late_time", float("inf"))
+        st = c_info.get("service_time", 0)
+        level = c_info.get("emergency_level", "normal")
+
+        # 迟到不可行：所有等级均触发路线分割，开新车从 t=0 准时送达
+        if arrival > lt:
+            return False, current_time
+
+        if arrival < et and level == "medical":
+            next_time = et + st
+        else:
+            next_time = max(arrival, et) + st if level == "medical" else arrival + st
+
+        return True, next_time
 
     @staticmethod
     def _neighbor(sequence, rng):

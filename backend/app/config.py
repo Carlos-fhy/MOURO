@@ -50,6 +50,7 @@ class Config:
 
     # --- 业务默认参数 ---
     DEFAULT_VEHICLE_CAPACITY = 1000  # kg
+    DEFAULT_MAX_RUNTIME_SEC = 60     # 算法总时限（秒）
     DEFAULT_LAMBDAS = [0.33, 0.33, 0.34]
     ALPHA_BASE = 1.0                 # 基础早到惩罚系数
     BETA_BASE = 2.0                  # 基础迟到惩罚系数

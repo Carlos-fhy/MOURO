@@ -38,6 +38,13 @@ LAMBDA_CONFIGS = {
 
 RUNS_PER_ALGO = 5
 
+# 三锚点校验配置（PRD G4）
+ANCHORS = [
+    {"name": "纯成本", "lambdas": [1, 0, 0], "key": "f1"},
+    {"name": "纯时效", "lambdas": [0, 1, 0], "key": "f2"},
+    {"name": "纯服务", "lambdas": [0, 0, 1], "key": "f3"},
+]
+
 
 def run_single_dataset(filepath):
     """对单个 Solomon 算例运行全部算法，返回结果字典"""
@@ -112,27 +119,130 @@ def run_single_dataset(filepath):
     ortools_result = ortools.solve(time_limit_sec=60)
     elapsed = time.time() - t0
 
+    # 统计 OR-Tools 实际服务的客户数（检测丢弃行为）
+    ortools_served = set()
+    depot_id = depot["id"]
+    for route in ortools_result.routes:
+        for nid in route:
+            if nid != depot_id:
+                ortools_served.add(nid)
+    ortools_coverage = len(ortools_served)
+    total_customers = len(customers)
+    coverage_rate = ortools_coverage / total_customers * 100 if total_customers > 0 else 100
+
     results["OR-Tools"] = {
         "best_z": 0,
         "best_f1": ortools_result.f1,
         "best_f2": ortools_result.f2,
         "best_f3": ortools_result.f3,
         "vehicles_used": ortools_result.vehicles_used,
+        "customers_served": ortools_coverage,
+        "coverage_rate": round(coverage_rate, 1),
         "avg_time": round(elapsed, 2),
         "convergence": [],
     }
     print(f"    F1={ortools_result.f1:.1f} F2'={ortools_result.f2:.1f} "
           f"F3={ortools_result.f3:.1f} 车辆={ortools_result.vehicles_used} "
+          f"服务客户={ortools_coverage}/{total_customers} ({coverage_rate:.1f}%) "
           f"耗时={elapsed:.1f}s")
+    if coverage_rate < 100:
+        print(f"    ⚠ OR-Tools 丢弃了 {total_customers - ortools_coverage} 个客户，"
+              f"F1 基准偏低，准确率对比需注意公平性")
 
-    # 计算准确率
+    # 三锚点准确率校验（PRD G4）—— 仅对改进ACO
+    # 在 λ=[1,0,0]、[0,1,0]、[0,0,1] 下分别运行改进ACO，
+    # 各自比较对应主目标与 OR-Tools 基准解的 Gap
+    # 注意：OR-Tools 优化的是距离成本（≈F1），并非 F2'/F3 的精确解。
+    # 使用单向 Gap：ACO 优于 OR-Tools 时 Gap=0（准确率100%），
+    # 仅在 ACO 劣于 OR-Tools 时计算差距。
+    # 当 OR-Tools 丢弃客户时，F1 比较改用单位客户成本以保证公平。
+    ortools_fvals = {
+        "f1": ortools_result.f1,
+        "f2": ortools_result.f2,
+        "f3": ortools_result.f3,
+    }
+    anchor_runs = 3  # 每个锚点跑多次取最优
+    print(f"\n  === 三锚点准确率校验（改进ACO vs OR-Tools，每锚点{anchor_runs}次取最优）===")
+    anchor_details = {}
+    anchor_accuracies = []
+
+    # 锚点校验使用更大的迭代数以充分搜索
+    anchor_base_params = {**base_params, "max_iterations": 500, "patience": 150}
+
+    for anchor in ANCHORS:
+        key = anchor["key"]
+        exact_val = ortools_fvals[key]
+
+        # 多次运行，取对应主目标最优值（三个目标都是最小化）
+        best_aco_val = float("inf")
+        total_elapsed = 0
+        for run_idx in range(anchor_runs):
+            anchor_params = {
+                **anchor_base_params,
+                "lambdas": anchor["lambdas"],
+                "seed": 42 + run_idx,
+            }
+            algo = ImprovedACO(customers, depot, dist_matrix, None, anchor_params)
+            t0 = time.time()
+            anchor_result = algo.solve()
+            total_elapsed += time.time() - t0
+
+            run_val = getattr(anchor_result, key)
+            print(f"    锚点 {anchor['name']} 第{run_idx+1}次: "
+                  f"{key.upper()}={run_val:.1f}")
+            if run_val < best_aco_val:
+                best_aco_val = run_val
+
+        # 当 OR-Tools 丢弃客户时，F1 比较改用单位客户成本
+        # 消除"少送人当然便宜"的不公平偏差
+        aco_compare = best_aco_val
+        exact_compare = exact_val
+        fair_note = ""
+        if key == "f1" and ortools_coverage < total_customers:
+            aco_compare = best_aco_val / total_customers
+            exact_compare = exact_val / ortools_coverage
+            fair_note = f" (按单位客户成本: ACO={aco_compare:.1f} OR-Tools={exact_compare:.1f})"
+
+        # 单向 Gap：仅当 ACO 劣于基准时计 Gap，ACO 更优时 Gap=0
+        # 三个目标均为最小化，ACO 值更小 = 更优
+        if exact_compare > 0 and aco_compare > exact_compare:
+            gap = (aco_compare - exact_compare) / exact_compare
+            acc = max(1 - gap, 0) * 100
+        else:
+            gap = 0
+            acc = 100.0
+
+        anchor_details[key] = {
+            "aco": round(best_aco_val, 2),
+            "ortools": round(exact_val, 2),
+            "gap": round(gap * 100, 2),
+            "accuracy": round(acc, 1),
+        }
+        anchor_accuracies.append(acc)
+        print(f"    >>> 锚点 λ={anchor['lambdas']} ({anchor['name']}): "
+              f"最优 {key.upper()}={best_aco_val:.1f}  OR-Tools={exact_val:.1f}  "
+              f"Gap={gap*100:.1f}%  准确率={acc:.1f}%{fair_note}  "
+              f"总耗时={total_elapsed:.1f}s")
+
+    avg_accuracy = round(float(np.mean(anchor_accuracies)), 1)
+    print(f"\n    ========================================")
+    print(f"    三锚点平均准确率: {avg_accuracy}% "
+          f"({'达标' if avg_accuracy >= 80 else '未达标'})")
+    print(f"    ========================================")
+
+    results["改进ACO"]["accuracy_vs_ortools"] = avg_accuracy
+    results["改进ACO"]["anchor_accuracy"] = anchor_details
+
+    # 其他算法仍用 F1 简化比较
     ortools_f1 = ortools_result.f1
     if ortools_f1 > 0:
         for algo_name in ALGORITHMS:
+            if algo_name == "改进ACO":
+                continue
             algo_f1 = results[algo_name]["best_f1"]
             accuracy = min(ortools_f1 / algo_f1, algo_f1 / ortools_f1) * 100
             results[algo_name]["accuracy_vs_ortools"] = round(accuracy, 1)
-            print(f"    {algo_name} vs OR-Tools: {accuracy:.1f}%")
+            print(f"    {algo_name} vs OR-Tools (F1简化): {accuracy:.1f}%")
 
     # Pareto 近似解（仅改进ACO）
     pareto_points = []

@@ -110,6 +110,7 @@ def load_seoul_to_db(instance_dir, emergency_ratio=None, seed=42, dataset_id=Non
     customers = generate_fields(
         customers, dist_matrix,
         emergency_ratio=emergency_ratio, seed=seed,
+        time_matrix=time_matrix,
     )
 
     # 4. 清除旧数据并写入数据库
