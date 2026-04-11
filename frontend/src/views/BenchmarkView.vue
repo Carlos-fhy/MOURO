@@ -10,7 +10,6 @@
     />
 
     <template v-if="allData.length">
-      <!-- 数据集切换 -->
       <el-tabs v-model="activeTab" type="border-card" class="dataset-tabs">
         <el-tab-pane
           v-for="(ds, idx) in allData"
@@ -18,7 +17,6 @@
           :label="ds.dataset"
           :name="String(idx)"
         >
-          <!-- 数据集基本信息 -->
           <div class="dataset-info">
             <span>客户数：<strong>{{ ds.customer_count }}</strong></span>
             <span>车辆容量：<strong>{{ ds.vehicle_capacity }}</strong></span>
@@ -27,11 +25,10 @@
         </el-tab-pane>
       </el-tabs>
 
-      <!-- 性能指标表 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
         <template #header>算法性能指标汇总</template>
         <el-table :data="tableData" stripe border size="small">
-          <el-table-column prop="name" label="算法" width="120" />
+          <el-table-column prop="name" label="算法" width="220" />
           <el-table-column prop="best_z" label="最优 Z" width="100" />
           <el-table-column prop="avg_z" label="平均 Z" width="100" />
           <el-table-column prop="std_z" label="标准差" width="100" />
@@ -49,13 +46,12 @@
               >
                 {{ row.accuracy }}%
               </el-tag>
-              <span v-else>—</span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
         </el-table>
       </el-card>
 
-      <!-- 图表区域 -->
       <div class="charts-row">
         <el-card shadow="hover" class="chart-card">
           <template #header>目标函数对比 (F1 / F2' / F3)</template>
@@ -83,9 +79,8 @@
         <v-chart :option="timeBarOption" autoresize style="height: 300px" />
       </el-card>
 
-      <!-- 跨数据集准确率汇总 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
-        <template #header>改进ACO 各数据集准确率汇总</template>
+        <template #header>改进ACO 与 自适应大邻域搜索（ALNS）各数据集准确率汇总</template>
         <v-chart :option="crossDatasetOption" autoresize style="height: 300px" />
       </el-card>
     </template>
@@ -107,11 +102,15 @@ const COLORS = {
   '改进ACO': '#409EFF',
   '标准ACO': '#67C23A',
   '遗传算法': '#E6A23C',
+  'ALNS算法': '#36CFC9',
   '模拟退火': '#F56C6C',
   'OR-Tools': '#909399'
 }
 
-// 当前选中的数据集
+function displayName(name) {
+  return name === 'ALNS算法' ? '自适应大邻域搜索（ALNS）' : name
+}
+
 const data = computed(() => {
   const idx = parseInt(activeTab.value)
   return allData.value[idx] || null
@@ -123,45 +122,40 @@ onMounted(async () => {
     const res = await fetch('/benchmark.json')
     if (!res.ok) throw new Error('加载失败')
     const json = await res.json()
-    // 兼容旧格式（单个对象）和新格式（数组）
     allData.value = Array.isArray(json) ? json : [json]
   } catch (e) {
-    error.value = '无法加载基准测试数据：' + e.message
+    error.value = `无法加载基准测试数据：${e.message}`
   } finally {
     loading.value = false
   }
 })
 
-// 表格数据
 const tableData = computed(() => {
   if (!data.value) return []
   return Object.entries(data.value.algorithms).map(([name, algo]) => ({
-    name,
-    best_z: algo.best_z ?? '—',
-    avg_z: algo.avg_z ?? '—',
-    std_z: algo.std_z ?? '—',
-    best_f1: algo.best_f1?.toFixed(2),
-    best_f2: algo.best_f2?.toFixed(2),
-    best_f3: algo.best_f3?.toFixed(2),
+    name: displayName(name),
+    best_z: algo.best_z ?? '-',
+    avg_z: algo.avg_z ?? '-',
+    std_z: algo.std_z ?? '-',
+    best_f1: algo.best_f1?.toFixed?.(2) ?? algo.best_f1,
+    best_f2: algo.best_f2?.toFixed?.(2) ?? algo.best_f2,
+    best_f3: algo.best_f3?.toFixed?.(2) ?? algo.best_f3,
     vehicles_used: algo.vehicles_used,
     avg_time: algo.avg_time,
     accuracy: algo.accuracy_vs_ortools ?? null
   }))
 })
 
-// 算法名列表（不含 OR-Tools）
 const algoNames = computed(() => {
   if (!data.value) return []
   return Object.keys(data.value.algorithms).filter(n => n !== 'OR-Tools')
 })
 
-// 全部算法名
 const allNames = computed(() => {
   if (!data.value) return []
   return Object.keys(data.value.algorithms)
 })
 
-// 目标函数柱状图
 const objectiveBarOption = computed(() => {
   if (!data.value) return {}
   const algos = data.value.algorithms
@@ -170,7 +164,7 @@ const objectiveBarOption = computed(() => {
     tooltip: { trigger: 'axis' },
     legend: { data: ['F1 (成本)', "F2' (时间)", 'F3 (惩罚)'] },
     grid: { left: 60, right: 20, bottom: 40, top: 50 },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 15 } },
+    xAxis: { type: 'category', data: names.map(displayName), axisLabel: { rotate: 15 } },
     yAxis: { type: 'value', name: '数值' },
     series: [
       {
@@ -195,7 +189,6 @@ const objectiveBarOption = computed(() => {
   }
 })
 
-// 准确率柱状图
 const accuracyBarOption = computed(() => {
   if (!data.value) return {}
   const algos = data.value.algorithms
@@ -203,8 +196,8 @@ const accuracyBarOption = computed(() => {
   return {
     tooltip: { trigger: 'axis', formatter: '{b}: {c}%' },
     grid: { left: 60, right: 20, bottom: 40, top: 30 },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 15 } },
-    yAxis: { type: 'value', name: '准确率 (%)', max: 100 },
+    xAxis: { type: 'category', data: names.map(displayName), axisLabel: { rotate: 15 } },
+    yAxis: { type: 'value', name: '准确率(%)', max: 100 },
     series: [{
       type: 'bar',
       data: names.map(n => ({
@@ -215,15 +208,14 @@ const accuracyBarOption = computed(() => {
       })),
       label: { show: true, position: 'top', formatter: '{c}%' },
       markLine: {
-        data: [{ yAxis: 80, name: '目标线 80%' }],
+        data: [{ yAxis: 80, name: '' }],
         lineStyle: { color: '#F56C6C', type: 'dashed' },
-        label: { formatter: '目标 80%' }
+        label: { formatter: '' }
       }
     }]
   }
 })
 
-// 收敛曲线
 const convergenceOption = computed(() => {
   if (!data.value) return {}
   const algos = data.value.algorithms
@@ -231,7 +223,7 @@ const convergenceOption = computed(() => {
   for (const [name, algo] of Object.entries(algos)) {
     if (!algo.convergence || algo.convergence.length === 0) continue
     series.push({
-      name,
+      name: displayName(name),
       type: 'line',
       smooth: true,
       data: algo.convergence.map(p => [p[0], p[1]]),
@@ -250,7 +242,6 @@ const convergenceOption = computed(() => {
   }
 })
 
-// Pareto 散点图
 const paretoOption = computed(() => {
   if (!data.value || !data.value.pareto_points) return {}
   const points = data.value.pareto_points
@@ -286,7 +277,6 @@ const paretoOption = computed(() => {
   }
 })
 
-// 耗时对比柱状图
 const timeBarOption = computed(() => {
   if (!data.value) return {}
   const algos = data.value.algorithms
@@ -294,7 +284,7 @@ const timeBarOption = computed(() => {
   return {
     tooltip: { trigger: 'axis', formatter: '{b}: {c}s' },
     grid: { left: 60, right: 20, bottom: 40, top: 20 },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 15 } },
+    xAxis: { type: 'category', data: names.map(displayName), axisLabel: { rotate: 15 } },
     yAxis: { type: 'value', name: '耗时 (秒)' },
     series: [{
       type: 'bar',
@@ -307,36 +297,56 @@ const timeBarOption = computed(() => {
   }
 })
 
-// 跨数据集：改进ACO 准确率汇总
 const crossDatasetOption = computed(() => {
   if (!allData.value.length) return {}
   const labels = []
-  const values = []
+  const improvedValues = []
+  const alnsValues = []
+
   for (const ds of allData.value) {
-    const acc = ds.algorithms?.['改进ACO']?.accuracy_vs_ortools
-    if (acc != null) {
+    const improvedAcc = ds.algorithms?.['改进ACO']?.accuracy_vs_ortools
+    const alnsAcc = ds.algorithms?.['ALNS算法']?.accuracy_vs_ortools
+    if (improvedAcc != null || alnsAcc != null) {
       labels.push(ds.dataset.replace('Solomon ', ''))
-      values.push(acc)
+      improvedValues.push(improvedAcc ?? null)
+      alnsValues.push(alnsAcc ?? null)
     }
   }
+
   return {
-    tooltip: { trigger: 'axis', formatter: '{b}: {c}%' },
-    grid: { left: 60, right: 20, bottom: 40, top: 20 },
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['改进ACO', '自适应大邻域搜索（ALNS）'] },
+    grid: { left: 60, right: 20, bottom: 40, top: 30 },
     xAxis: { type: 'category', data: labels },
-    yAxis: { type: 'value', name: '准确率 (%)', max: 100 },
-    series: [{
-      type: 'bar',
-      data: values.map(v => ({
-        value: v,
-        itemStyle: { color: v >= 80 ? '#67C23A' : v >= 60 ? '#E6A23C' : '#F56C6C' }
-      })),
-      label: { show: true, position: 'top', formatter: '{c}%' },
-      markLine: {
-        data: [{ yAxis: 80, name: '目标 80%' }],
+    yAxis: { type: 'value', name: '准确率(%)', max: 100 },
+    series: [
+      {
+        name: '改进ACO',
+        type: 'bar',
+        data: improvedValues.map(v => ({
+          value: v,
+          itemStyle: { color: '#409EFF' }
+        })),
+        label: { show: true, position: 'top', formatter: '{c}%' }
+      },
+      {
+        name: '自适应大邻域搜索（ALNS）',
+        type: 'bar',
+        data: alnsValues.map(v => ({
+          value: v,
+          itemStyle: { color: '#36CFC9' }
+        })),
+        label: { show: true, position: 'top', formatter: '{c}%' }
+      },
+      {
+        name: '目标 80%',
+        type: 'line',
+        data: labels.map(() => 80),
+        symbol: 'none',
         lineStyle: { color: '#F56C6C', type: 'dashed' },
-        label: { formatter: '目标 80%' }
+        tooltip: { show: false }
       }
-    }]
+    ]
   }
 })
 </script>
@@ -345,17 +355,20 @@ const crossDatasetOption = computed(() => {
 .dataset-tabs {
   margin-bottom: 16px;
 }
+
 .dataset-info {
   display: flex;
   gap: 32px;
   flex-wrap: wrap;
   padding: 4px 0;
 }
+
 .charts-row {
   display: flex;
   gap: 16px;
   margin-bottom: 16px;
 }
+
 .chart-card {
   flex: 1;
   min-width: 0;

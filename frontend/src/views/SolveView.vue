@@ -1,6 +1,5 @@
 <template>
   <div class="solve-view">
-    <!-- 前置检查 -->
     <el-alert
       v-if="!dataStore.customers.length"
       title="请先在数据管理页加载数据集"
@@ -11,7 +10,6 @@
     />
 
     <el-row :gutter="20">
-      <!-- 左侧：配置区 -->
       <el-col :span="12">
         <el-card shadow="hover">
           <template #header>求解配置</template>
@@ -21,6 +19,7 @@
                 <el-radio value="improved_aco">改进ACO</el-radio>
                 <el-radio value="standard_aco">标准ACO</el-radio>
                 <el-radio value="genetic">遗传算法</el-radio>
+                <el-radio value="alns">自适应大邻域搜索（ALNS）</el-radio>
                 <el-radio value="simulated_annealing">模拟退火</el-radio>
               </el-radio-group>
             </el-form-item>
@@ -60,7 +59,6 @@
         </el-card>
       </el-col>
 
-      <!-- 右侧：日志区 -->
       <el-col :span="12">
         <el-card shadow="hover">
           <template #header>运行日志</template>
@@ -69,9 +67,7 @@
       </el-col>
     </el-row>
 
-    <!-- ========== 求解结果区域 ========== -->
     <template v-if="resultStore.routes.length">
-      <!-- 不可达客户告警 -->
       <el-alert
         v-if="resultStore.unreachable.length"
         :title="`存在 ${resultStore.unreachable.length} 个不可达客户`"
@@ -81,7 +77,6 @@
         style="margin-top: 20px"
       />
 
-      <!-- KPI 卡片行 -->
       <el-row :gutter="16" class="kpi-row" style="margin-top: 20px">
         <el-col :span="6">
           <KpiCard icon="Money" label="总成本 F1" :value="resultStore.f1" color="#409EFF" />
@@ -97,7 +92,6 @@
         </el-col>
       </el-row>
 
-      <!-- 地图 + 收敛曲线 -->
       <el-row :gutter="16" style="margin-top: 16px">
         <el-col :span="14">
           <el-card shadow="hover">
@@ -135,7 +129,6 @@
         </el-col>
       </el-row>
 
-      <!-- 调度明细表 -->
       <el-card shadow="hover" style="margin-top: 16px">
         <template #header>调度明细</template>
         <ScheduleTable :schedule="resultStore.schedule" />
@@ -147,6 +140,7 @@
 <script setup>
 import { ref, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { RefreshRight } from '@element-plus/icons-vue'
 import { useDataStore } from '../stores/data'
 import { useSolveStore } from '../stores/solve'
 import { useResultStore } from '../stores/result'
@@ -216,7 +210,6 @@ function connectSse(taskId) {
         if (res.success) {
           resultStore.setResult(res.data)
           ElMessage.success('求解完成')
-          // 滚动到结果区域
           await nextTick()
           document.querySelector('.solve-view .kpi-row')
             ?.scrollIntoView({ behavior: 'smooth', block: 'start' })

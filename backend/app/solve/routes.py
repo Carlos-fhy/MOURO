@@ -16,6 +16,7 @@ ALGORITHM_MAP = {
     "standard_aco": "app.algorithm.standard_aco.StandardACO",
     "genetic": "app.algorithm.genetic.GeneticAlgorithm",
     "simulated_annealing": "app.algorithm.simulated_annealing.SimulatedAnnealing",
+    "alns": "app.algorithm.alns.ALNSAlgorithm",
     "ortools": "app.algorithm.ortools_solver.ORToolsSolver",
 }
 

@@ -173,6 +173,24 @@ class TestSimulatedAnnealing:
         assert len(result.convergence) > 0
 
 
+class TestALNSAlgorithm:
+    def test_solve_returns_valid_result(self, small_instance):
+        """ALNS：输出格式完整且所有客户都被访问"""
+        from app.algorithm.alns import ALNSAlgorithm
+        depot, customers, dist, time_mat, params = small_instance
+        solver = ALNSAlgorithm(customers, depot, dist, time_mat, params)
+        result = solver.solve()
+        _validate_result(result, customers)
+
+    def test_convergence_recorded(self, small_instance):
+        """ALNS：收敛曲线非空"""
+        from app.algorithm.alns import ALNSAlgorithm
+        depot, customers, dist, time_mat, params = small_instance
+        solver = ALNSAlgorithm(customers, depot, dist, time_mat, params)
+        result = solver.solve()
+        assert len(result.convergence) > 0
+
+
 # ── OR-Tools 精确求解器测试 ──
 
 class TestORToolsSolver:
@@ -201,6 +219,7 @@ class TestCrossAlgorithm:
         from app.algorithm.improved_aco import ImprovedACO
         from app.algorithm.standard_aco import StandardACO
         from app.algorithm.genetic import GeneticAlgorithm
+        from app.algorithm.alns import ALNSAlgorithm
         from app.algorithm.simulated_annealing import SimulatedAnnealing
 
         depot, customers, dist, time_mat, params = small_instance
@@ -210,6 +229,7 @@ class TestCrossAlgorithm:
         for name, cls in [("improved_aco", ImprovedACO),
                           ("standard_aco", StandardACO),
                           ("ga", GeneticAlgorithm),
+                          ("alns", ALNSAlgorithm),
                           ("sa", SimulatedAnnealing)]:
             solver = cls(customers, depot, dist, time_mat, params)
             results[name] = solver.solve()

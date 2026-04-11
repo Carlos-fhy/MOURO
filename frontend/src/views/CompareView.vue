@@ -1,6 +1,5 @@
 <template>
   <div class="compare-view">
-    <!-- 配置区 -->
     <el-card shadow="hover" style="margin-bottom: 16px">
       <template #header>对比配置</template>
       <el-form label-width="120px">
@@ -9,6 +8,7 @@
             <el-checkbox value="improved_aco" label="改进ACO" />
             <el-checkbox value="standard_aco" label="标准ACO" />
             <el-checkbox value="genetic" label="遗传算法" />
+            <el-checkbox value="alns" label="自适应大邻域搜索（ALNS）" />
             <el-checkbox value="simulated_annealing" label="模拟退火" />
           </el-checkbox-group>
           <div v-if="selectedAlgos.length < 2" class="hint-text">
@@ -37,37 +37,32 @@
       </el-form>
     </el-card>
 
-    <!-- SSE 日志 -->
     <el-card v-if="logs.length" shadow="hover" style="margin-bottom: 16px">
       <template #header>运行日志</template>
       <SseLogBox :logs="logs" />
     </el-card>
 
-    <!-- 对比结果区 -->
     <template v-if="compareResults.length">
-      <!-- 柱状图 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
         <template #header>指标对比</template>
         <v-chart class="bar-chart" :option="barOption" autoresize />
       </el-card>
 
-      <!-- 收敛对比 -->
       <el-card shadow="hover" style="margin-bottom: 16px">
         <template #header>收敛曲线对比</template>
         <ConvergenceChart :multi-series="convergenceData" />
       </el-card>
 
-      <!-- 性能指标表 -->
       <el-card shadow="hover">
         <template #header>性能指标</template>
         <el-table :data="compareResults" stripe border size="small">
-          <el-table-column prop="algorithm" label="算法" width="120">
+          <el-table-column prop="algorithm" label="算法" width="180">
             <template #default="{ row }">{{ algoLabel(row.algorithm) }}</template>
           </el-table-column>
-          <el-table-column label="最优Z" width="100">
+          <el-table-column label="最优 Z" width="100">
             <template #default="{ row }">{{ row.best_z?.toFixed(4) }}</template>
           </el-table-column>
-          <el-table-column label="平均Z" width="100">
+          <el-table-column label="平均 Z" width="100">
             <template #default="{ row }">{{ row.avg_z?.toFixed(4) }}</template>
           </el-table-column>
           <el-table-column label="标准差" width="100">
@@ -127,6 +122,7 @@ const ALGO_LABELS = {
   improved_aco: '改进ACO',
   standard_aco: '标准ACO',
   genetic: '遗传算法',
+  alns: '自适应大邻域搜索（ALNS）',
   simulated_annealing: '模拟退火'
 }
 
@@ -134,7 +130,6 @@ function algoLabel(key) {
   return ALGO_LABELS[key] || key
 }
 
-// 收敛曲线多系列数据
 const convergenceData = computed(() => {
   const result = {}
   compareResults.value.forEach(r => {
@@ -145,14 +140,13 @@ const convergenceData = computed(() => {
   return result
 })
 
-// 柱状图配置
 const barOption = computed(() => {
   const algos = compareResults.value.map(r => algoLabel(r.algorithm))
   return {
     tooltip: { trigger: 'axis' },
     legend: { data: ['F1', "F2'", 'F3', 'Z'] },
     grid: { left: 60, right: 20, top: 40, bottom: 40 },
-    xAxis: { type: 'category', data: algos },
+    xAxis: { type: 'category', data: algos, axisLabel: { interval: 0, rotate: 10 } },
     yAxis: { type: 'value' },
     series: [
       { name: 'F1', type: 'bar', data: compareResults.value.map(r => r.best_f1) },
@@ -221,6 +215,7 @@ function connectSse(taskId) {
   color: #E6A23C;
   margin-top: 4px;
 }
+
 .bar-chart {
   width: 100%;
   height: 350px;

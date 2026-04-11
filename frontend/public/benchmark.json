@@ -1601,6 +1601,18 @@
         "vehicles_used": 10,
         "avg_time": 60.05,
         "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0327,
+        "avg_z": 0.0445,
+        "std_z": 0.0097,
+        "best_f1": 8092.1,
+        "best_f2": 44252.7,
+        "best_f3": 8542.5,
+        "vehicles_used": 14,
+        "avg_time": 1.5,
+        "accuracy_vs_ortools": 76.5,
+        "convergence": []
       }
     },
     "pareto_points": [
@@ -3187,6 +3199,18 @@
         "vehicles_used": 3,
         "avg_time": 60.01,
         "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0335,
+        "avg_z": 0.0405,
+        "std_z": 0.0089,
+        "best_f1": 5019.6,
+        "best_f2": 103141.2,
+        "best_f3": 72001.4,
+        "vehicles_used": 6,
+        "avg_time": 4.22,
+        "accuracy_vs_ortools": 69.8,
+        "convergence": []
       }
     },
     "pareto_points": [
@@ -4661,6 +4685,18 @@
         "vehicles_used": 8,
         "avg_time": 60.01,
         "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0129,
+        "avg_z": 0.0162,
+        "std_z": 0.0031,
+        "best_f1": 10213.8,
+        "best_f2": 8141.7,
+        "best_f3": 3400.8,
+        "vehicles_used": 17,
+        "avg_time": 1.56,
+        "accuracy_vs_ortools": 57.4,
+        "convergence": []
       }
     },
     "pareto_points": [
@@ -6074,6 +6110,18 @@
         "best_f3": 40706.09,
         "vehicles_used": 3,
         "avg_time": 60.01,
+        "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0151,
+        "avg_z": 0.019,
+        "std_z": 0.0021,
+        "best_f1": 5579.5,
+        "best_f2": 23517.1,
+        "best_f3": 23934.4,
+        "vehicles_used": 6,
+        "avg_time": 3.86,
+        "accuracy_vs_ortools": 71.5,
         "convergence": []
       }
     },
@@ -7489,6 +7537,18 @@
         "vehicles_used": 9,
         "avg_time": 60.01,
         "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0085,
+        "avg_z": 0.0158,
+        "std_z": 0.0069,
+        "best_f1": 11048.1,
+        "best_f2": 9228.3,
+        "best_f3": 2258.6,
+        "vehicles_used": 16,
+        "avg_time": 1.52,
+        "accuracy_vs_ortools": 62.9,
+        "convergence": []
       }
     },
     "pareto_points": [
@@ -8898,6 +8958,18 @@
         "best_f3": 79926.17,
         "vehicles_used": 2,
         "avg_time": 60.01,
+        "convergence": []
+      },
+      "ALNS": {
+        "best_z": 0.0083,
+        "avg_z": 0.0132,
+        "std_z": 0.0031,
+        "best_f1": 6313.4,
+        "best_f2": 22957.2,
+        "best_f3": 21726.9,
+        "vehicles_used": 6,
+        "avg_time": 3.6,
+        "accuracy_vs_ortools": 60.9,
         "convergence": []
       }
     },
