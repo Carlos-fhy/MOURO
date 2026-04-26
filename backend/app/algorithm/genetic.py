@@ -5,7 +5,8 @@ from app.algorithm.greedy import GreedySolver
 from app.algorithm.local_search import repair_late_customers
 from app.algorithm.precheck import precheck_reachability
 from app.utils.objective import (
-    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
+    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z,
+    calculate_reference_z,
 )
 
 
@@ -64,6 +65,11 @@ class GeneticAlgorithm(BaseAlgorithm):
         working_ids = [c["id"] for c in working_customers]
 
         # ---- 2. 初始种群：一个贪心解 + 其余随机排列 ----
+        greedy = GreedySolver(
+            working_customers, self.depot,
+            self.distance_matrix, self.time_matrix, self.params
+        )
+        greedy_result = greedy.solve()
         population = self._init_population(working_customers, working_ids, rng)
 
         # ---- 3. 迭代状态变量 ----
@@ -209,12 +215,9 @@ class GeneticAlgorithm(BaseAlgorithm):
         best_f1 = final_eval["f1"]
         best_f2 = final_eval["f2"]
         best_f3 = final_eval["f3"]
-        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
-            best_z = calculate_z(
-                best_f1, best_f2, best_f3,
-                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                self.lambdas
-            )
+        best_z = calculate_reference_z(
+            best_f1, best_f2, best_f3, greedy_result, self.lambdas
+        )
 
         final_schedule = build_schedule(
             best_routes, working_dict, self.time_matrix,

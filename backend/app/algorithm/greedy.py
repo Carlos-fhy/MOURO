@@ -101,4 +101,5 @@ class GreedySolver:
             "routes": routes,
             "f1_nn": result["f1"],
             "f2_nn": result["f2"],
+            "f3_nn": result["f3"],
         }

@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.utils.objective import (
     calculate_f1, calculate_f2, calculate_f3,
-    build_schedule, calculate_z, evaluate_solution,
+    build_schedule, calculate_reference_z, calculate_z, evaluate_solution,
 )
 from app.utils.normalize import min_max_normalize
 
@@ -157,6 +157,25 @@ def test_z_single_objective():
         lambdas=[1, 0, 0]
     )
     assert abs(z - 0.5) < 1e-9
+
+
+def test_reference_z_uses_fixed_greedy_baseline():
+    """固定参考 Z：参考解为 1，优于参考解小于 1。"""
+    reference = {"f1_nn": 100, "f2_nn": 200, "f3_nn": 50}
+
+    baseline_z = calculate_reference_z(
+        f1=100, f2=200, f3=50,
+        reference=reference,
+        lambdas=[0.33, 0.33, 0.34],
+    )
+    better_z = calculate_reference_z(
+        f1=80, f2=160, f3=40,
+        reference=reference,
+        lambdas=[0.33, 0.33, 0.34],
+    )
+
+    assert abs(baseline_z - 1.0) < 1e-9
+    assert abs(better_z - 0.8) < 1e-9
 
 
 # ---- evaluate_solution 综合测试 ----

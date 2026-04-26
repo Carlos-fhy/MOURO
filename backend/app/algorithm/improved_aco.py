@@ -5,7 +5,8 @@ from app.algorithm.greedy import GreedySolver
 from app.algorithm.precheck import precheck_reachability
 from app.algorithm.local_search import full_local_search, repair_late_customers, tw_attractiveness
 from app.utils.objective import (
-    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
+    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z,
+    calculate_reference_z,
 )
 
 
@@ -52,6 +53,7 @@ class Ant:
         self.gamma = params.get("gamma", 1.0)    # 时间信息素重要度
         self.delta = params.get("delta", 2.0)    # 时间启发式重要度
         self.capacity = params.get("vehicle_capacity", 1000)
+        self.q0 = params.get("q0", 0.3)
 
     def construct_solution(self):
         """构建一条完整的 VRPTW 解
@@ -77,7 +79,10 @@ class Ant:
                     break
 
                 # 轮盘赌选择下一个客户
-                chosen = self.rng.choice(candidates, p=probs)
+                if self.rng.random() < self.q0:
+                    chosen = candidates[int(np.argmax(probs))]
+                else:
+                    chosen = self.rng.choice(candidates, p=probs)
                 c_info = self.customers_dict[chosen]
 
                 # 更新时间和载重
@@ -304,10 +309,8 @@ class ImprovedACO(BaseAlgorithm):
                 f2_min, f2_max = min(f2_min, f2), max(f2_max, f2)
                 f3_min, f3_max = min(f3_min, f3), max(f3_max, f3)
 
-                z = calculate_z(
-                    f1, f2, f3,
-                    (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                    self.lambdas
+                z = calculate_reference_z(
+                    f1, f2, f3, greedy_result, self.lambdas
                 )
 
                 if z < iter_best_z:
@@ -329,7 +332,13 @@ class ImprovedACO(BaseAlgorithm):
                         "done": 0,
                         "total": 1,
                     })
-                iter_best_routes = full_local_search(
+                original_routes = iter_best_routes
+                original_f1 = iter_best_f1
+                original_f2 = iter_best_f2
+                original_f3 = iter_best_f3
+                original_z = iter_best_z
+
+                candidate_routes = full_local_search(
                     iter_best_routes, self.distance_matrix, self.id_to_idx,
                     working_dict, self.vehicle_capacity,
                     time_matrix=self.time_matrix
@@ -344,20 +353,32 @@ class ImprovedACO(BaseAlgorithm):
                     })
                 # 重新评估 2-opt 后的解
                 schedule = build_schedule(
-                    iter_best_routes, working_dict, self.time_matrix,
+                    candidate_routes, working_dict, self.time_matrix,
                     self.id_to_idx, self.alpha_base, self.beta_base
                 )
-                iter_best_f1 = calculate_f1(
-                    iter_best_routes, self.distance_matrix, self.id_to_idx,
+                candidate_f1 = calculate_f1(
+                    candidate_routes, self.distance_matrix, self.id_to_idx,
                     self.fixed_cost, self.cost_per_km
                 )
-                iter_best_f2 = calculate_f2(schedule, working_dict)
-                iter_best_f3 = calculate_f3(schedule, working_dict)
-                iter_best_z = calculate_z(
-                    iter_best_f1, iter_best_f2, iter_best_f3,
-                    (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                    self.lambdas
+                candidate_f2 = calculate_f2(schedule, working_dict)
+                candidate_f3 = calculate_f3(schedule, working_dict)
+                candidate_z = calculate_reference_z(
+                    candidate_f1, candidate_f2, candidate_f3,
+                    greedy_result, self.lambdas
                 )
+
+                if candidate_z <= original_z + 1e-12:
+                    iter_best_routes = candidate_routes
+                    iter_best_f1 = candidate_f1
+                    iter_best_f2 = candidate_f2
+                    iter_best_f3 = candidate_f3
+                    iter_best_z = candidate_z
+                else:
+                    iter_best_routes = original_routes
+                    iter_best_f1 = original_f1
+                    iter_best_f2 = original_f2
+                    iter_best_f3 = original_f3
+                    iter_best_z = original_z
 
             # 更新全局最优
             if iter_best_z < best_z - self.early_stop_threshold:
@@ -411,6 +432,9 @@ class ImprovedACO(BaseAlgorithm):
         best_routes = repair_late_customers(
             best_routes, self.time_matrix, self.id_to_idx, working_dict
         )
+        best_routes = self._reference_z_relocate(
+            best_routes, working_dict, greedy_result
+        )
 
         final_schedule = build_schedule(
             best_routes, working_dict, self.time_matrix,
@@ -422,14 +446,9 @@ class ImprovedACO(BaseAlgorithm):
         )
         best_f2 = calculate_f2(final_schedule, working_dict)
         best_f3 = calculate_f3(final_schedule, working_dict)
-        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
-            best_z = calculate_z(
-                best_f1, best_f2, best_f3,
-                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                self.lambdas
-            )
-        elif not np.isfinite(best_z):
-            best_z = 0.0
+        best_z = calculate_reference_z(
+            best_f1, best_f2, best_f3, greedy_result, self.lambdas
+        )
         vehicles_used = sum(1 for r in best_routes if len(r) > 2)
 
         return SolutionResult(
@@ -443,6 +462,98 @@ class ImprovedACO(BaseAlgorithm):
             schedule=final_schedule,
             unreachable=unreachable_ids,
         )
+
+    def _reference_z_relocate(self, routes, customers_dict, reference):
+        """Final relocate pass that accepts moves by the final reference-Z."""
+        routes = [list(route) for route in routes if len(route) > 2]
+        max_rounds = int(self.params.get("final_relocate_rounds", 3))
+        if max_rounds <= 0:
+            return routes
+
+        best_routes = routes
+        best_f1, best_f2, best_f3, best_z = self._evaluate_reference_z(
+            best_routes, customers_dict, reference
+        )
+
+        for _ in range(max_rounds):
+            improved = False
+            for src_idx, source in enumerate(list(best_routes)):
+                if len(source) <= 3:
+                    continue
+                for pos in range(1, len(source) - 1):
+                    cid = source[pos]
+                    demand = self._customer_demand(cid, customers_dict)
+                    for dst_idx, target in enumerate(list(best_routes)):
+                        if src_idx == dst_idx:
+                            continue
+                        if self._route_load(target, customers_dict) + demand > self.vehicle_capacity:
+                            continue
+                        for insert_pos in range(1, len(target)):
+                            candidate = [list(route) for route in best_routes]
+                            moved = candidate[src_idx].pop(pos)
+                            candidate[dst_idx].insert(insert_pos, moved)
+                            candidate = [route for route in candidate if len(route) > 2]
+                            if not self._routes_time_ok(candidate, customers_dict):
+                                continue
+                            cand_f1, cand_f2, cand_f3, cand_z = self._evaluate_reference_z(
+                                candidate, customers_dict, reference
+                            )
+                            if cand_z < best_z - self.early_stop_threshold:
+                                best_routes = candidate
+                                best_f1, best_f2, best_f3, best_z = cand_f1, cand_f2, cand_f3, cand_z
+                                improved = True
+                                break
+                        if improved:
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+            if not improved:
+                break
+        return best_routes
+
+    def _evaluate_reference_z(self, routes, customers_dict, reference):
+        schedule = build_schedule(
+            routes, customers_dict, self.time_matrix,
+            self.id_to_idx, self.alpha_base, self.beta_base
+        )
+        f1 = calculate_f1(
+            routes, self.distance_matrix, self.id_to_idx,
+            self.fixed_cost, self.cost_per_km
+        )
+        f2 = calculate_f2(schedule, customers_dict)
+        f3 = calculate_f3(schedule, customers_dict)
+        z = calculate_reference_z(f1, f2, f3, reference, self.lambdas)
+        return f1, f2, f3, z
+
+    def _routes_time_ok(self, routes, customers_dict):
+        for route in routes:
+            current_time = 0.0
+            for idx in range(1, len(route) - 1):
+                prev_idx = self.id_to_idx[route[idx - 1]]
+                curr_idx = self.id_to_idx[route[idx]]
+                arrival = current_time + self.time_matrix[prev_idx][curr_idx]
+                customer = customers_dict.get(route[idx], {})
+                et = customer.get("early_time", 0)
+                lt = customer.get("late_time", float("inf"))
+                st = customer.get("service_time", 0)
+                level = customer.get("emergency_level", "normal")
+                if level == "medical" and arrival > lt:
+                    return False
+                if arrival < et and level == "medical":
+                    current_time = et + st
+                else:
+                    current_time = max(arrival, et) + st if level == "medical" else arrival + st
+        return True
+
+    @staticmethod
+    def _customer_demand(cid, customers_dict):
+        customer = customers_dict.get(cid, {})
+        return customer.get("demand", customer.get("demand_weight", 0))
+
+    def _route_load(self, route, customers_dict):
+        return sum(self._customer_demand(cid, customers_dict) for cid in route[1:-1])
 
     def _update_pheromone(self, tau_cost, tau_time, routes, f1, f2):
         """精英蚂蚁信息素更新

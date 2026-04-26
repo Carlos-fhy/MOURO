@@ -12,6 +12,7 @@ from app.utils.objective import (
     calculate_f2,
     calculate_f3,
     calculate_z,
+    calculate_reference_z,
 )
 
 
@@ -210,12 +211,9 @@ class SimulatedAnnealing(BaseAlgorithm):
             best_routes, self.time_matrix, self.id_to_idx, working_dict
         )
         best_f1, best_f2, best_f3 = self._evaluate(best_routes, working_dict)
-        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
-            best_z = calculate_z(
-                best_f1, best_f2, best_f3,
-                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                self.lambdas
-            )
+        best_z = calculate_reference_z(
+            best_f1, best_f2, best_f3, greedy_result, self.lambdas
+        )
 
         # ---- 构造最终调度明细 ----
         final_schedule = build_schedule(

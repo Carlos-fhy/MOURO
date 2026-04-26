@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="benchmark-page" v-loading="loading">
     <el-alert
       v-if="error"
@@ -103,12 +103,13 @@ const COLORS = {
   '标准ACO': '#67C23A',
   '遗传算法': '#E6A23C',
   'ALNS算法': '#36CFC9',
+  'ALNS': '#36CFC9',
   '模拟退火': '#F56C6C',
   'OR-Tools': '#909399'
 }
 
 function displayName(name) {
-  return name === 'ALNS算法' ? '自适应大邻域搜索（ALNS）' : name
+  return (name === 'ALNS算法' || name === 'ALNS') ? '自适应大邻域搜索（ALNS）' : name
 }
 
 const data = computed(() => {
@@ -305,7 +306,7 @@ const crossDatasetOption = computed(() => {
 
   for (const ds of allData.value) {
     const improvedAcc = ds.algorithms?.['改进ACO']?.accuracy_vs_ortools
-    const alnsAcc = ds.algorithms?.['ALNS算法']?.accuracy_vs_ortools
+    const alnsAcc = (ds.algorithms?.['ALNS'] ?? ds.algorithms?.['ALNS算法'])?.accuracy_vs_ortools
     if (improvedAcc != null || alnsAcc != null) {
       labels.push(ds.dataset.replace('Solomon ', ''))
       improvedValues.push(improvedAcc ?? null)
@@ -374,3 +375,4 @@ const crossDatasetOption = computed(() => {
   min-width: 0;
 }
 </style>
+

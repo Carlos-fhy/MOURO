@@ -18,6 +18,7 @@ from app.algorithm.standard_aco import StandardACO
 from app.algorithm.genetic import GeneticAlgorithm
 from app.algorithm.simulated_annealing import SimulatedAnnealing
 from app.algorithm.ortools_solver import ORToolsSolver
+from app.algorithm.alns import ALNSAlgorithm
 
 
 # Solomon 算例文件列表
@@ -28,6 +29,7 @@ ALGORITHMS = {
     "标准ACO": StandardACO,
     "遗传算法": GeneticAlgorithm,
     "模拟退火": SimulatedAnnealing,
+    "ALNS": ALNSAlgorithm,
 }
 
 LAMBDA_CONFIGS = {
@@ -131,7 +133,7 @@ def run_single_dataset(filepath):
     coverage_rate = ortools_coverage / total_customers * 100 if total_customers > 0 else 100
 
     results["OR-Tools"] = {
-        "best_z": 0,
+        "best_z": ortools_result.z,
         "best_f1": ortools_result.f1,
         "best_f2": ortools_result.f2,
         "best_f3": ortools_result.f3,

@@ -10,6 +10,7 @@ from app.utils.objective import (
     calculate_f2,
     calculate_f3,
     calculate_z,
+    calculate_reference_z,
 )
 
 
@@ -128,12 +129,9 @@ class ALNSAlgorithm(BaseAlgorithm):
             best_routes, self.time_matrix, self.id_to_idx, working_dict
         )
         final = self._evaluate_routes(best_routes, working_dict)
-        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
-            best_z = calculate_z(
-                final["f1"], final["f2"], final["f3"],
-                (f1_min, f1_max), (f2_min, f2_max), (f3_min, f3_max),
-                self.lambdas
-            )
+        best_z = calculate_reference_z(
+            final["f1"], final["f2"], final["f3"], greedy_result, self.lambdas
+        )
 
         return SolutionResult(
             routes=best_routes,

@@ -159,6 +159,25 @@ def calculate_z(f1, f2, f3, f1_bounds, f2_bounds, f3_bounds, lambdas):
     return lambdas[0] * f1_star + lambdas[1] * f2_star + lambdas[2] * f3_star
 
 
+def calculate_reference_z(f1, f2, f3, reference, lambdas, eps=1e-10):
+    """计算基于固定参考解的综合目标值。
+
+    默认使用贪心解作为 reference，使贪心解的 Z=1。若某算法在某个
+    目标上优于贪心，该目标分量会小于 1；劣于贪心则大于 1。
+    这种计算方式不依赖搜索过程中的动态 min/max 边界，适合作为
+    最终展示和算法对比的稳定 Z 值。
+    """
+    ref_f1 = max(abs(reference.get("f1", reference.get("f1_nn", 0.0))), eps)
+    ref_f2 = max(abs(reference.get("f2", reference.get("f2_nn", 0.0))), eps)
+    ref_f3 = max(abs(reference.get("f3", reference.get("f3_nn", 0.0))), eps)
+
+    return (
+        lambdas[0] * (f1 / ref_f1) +
+        lambdas[1] * (f2 / ref_f2) +
+        lambdas[2] * (f3 / ref_f3)
+    )
+
+
 def evaluate_solution(routes, customers, depot, distance_matrix, time_matrix,
                       id_to_idx, params):
     """一站式评估：给定路线，计算全部目标值和调度明细

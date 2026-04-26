@@ -5,7 +5,8 @@ from app.algorithm.greedy import GreedySolver
 from app.algorithm.precheck import precheck_reachability
 from app.algorithm.local_search import repair_late_customers, tw_attractiveness
 from app.utils.objective import (
-    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z
+    build_schedule, calculate_f1, calculate_f2, calculate_f3, calculate_z,
+    calculate_reference_z,
 )
 
 
@@ -157,12 +158,9 @@ class StandardACO(BaseAlgorithm):
                                self.fixed_cost, self.cost_per_km)
         best_f2 = calculate_f2(final_sched, working_dict)
         best_f3 = calculate_f3(final_sched, working_dict)
-        if all(np.isfinite(v) for v in (f1_min, f1_max, f2_min, f2_max, f3_min, f3_max)):
-            best_z = calculate_z(best_f1, best_f2, best_f3,
-                                 (f1_min, f1_max), (f2_min, f2_max),
-                                 (f3_min, f3_max), self.lambdas)
-        elif not np.isfinite(best_z):
-            best_z = 0.0
+        best_z = calculate_reference_z(
+            best_f1, best_f2, best_f3, greedy_result, self.lambdas
+        )
         vn = sum(1 for r in best_routes if len(r) > 2)
 
         return SolutionResult(

@@ -1,7 +1,11 @@
 # OR-Tools 精确求解器 —— 用于锚点校验的基准解
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 from app.algorithm.base import SolutionResult
-from app.utils.objective import build_schedule, calculate_f1, calculate_f2, calculate_f3
+from app.algorithm.greedy import GreedySolver
+from app.utils.objective import (
+    build_schedule, calculate_f1, calculate_f2, calculate_f3,
+    calculate_reference_z,
+)
 
 
 class ORToolsSolver:
@@ -25,6 +29,7 @@ class ORToolsSolver:
         self.time_matrix = time_matrix if time_matrix is not None else distance_matrix
         self.params = params
         self.vehicle_capacity = params.get("vehicle_capacity", 1000)
+        self.lambdas = params.get("lambdas", [0.33, 0.33, 0.34])
         self.alpha_base = params.get("alpha_base", 1.0)
         self.beta_base = params.get("beta_base", 2.0)
         self.fixed_cost = params.get("fixed_cost", 200)
@@ -157,11 +162,17 @@ class ORToolsSolver:
         )
         f2 = calculate_f2(schedule, self.customers_dict)
         f3 = calculate_f3(schedule, self.customers_dict)
+        greedy = GreedySolver(
+            self.customers, self.depot,
+            self.distance_matrix, self.time_matrix, self.params
+        )
+        greedy_result = greedy.solve()
+        z = calculate_reference_z(f1, f2, f3, greedy_result, self.lambdas)
         vehicles_used = sum(1 for r in routes if len(r) > 2)
 
         return SolutionResult(
             routes=routes, f1=round(f1, 2), f2=round(f2, 2),
-            f3=round(f3, 2), z=0.0, vehicles_used=vehicles_used,
+            f3=round(f3, 2), z=round(z, 6), vehicles_used=vehicles_used,
             convergence=[], schedule=schedule, unreachable=[],
         )
 
